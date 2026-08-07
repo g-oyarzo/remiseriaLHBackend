@@ -1,6 +1,6 @@
 <?php
 
-use App\Models\User;
+use App\Models\Cuenta;
 
 return [
 
@@ -17,7 +17,7 @@ return [
 
     'defaults' => [
         'guard' => env('AUTH_GUARD', 'web'),
-        'passwords' => env('AUTH_PASSWORD_BROKER', 'users'),
+        'passwords' => env('AUTH_PASSWORD_BROKER', 'cuentas'),
     ],
 
     /*
@@ -40,7 +40,7 @@ return [
     'guards' => [
         'web' => [
             'driver' => 'session',
-            'provider' => 'users',
+            'provider' => 'cuentas',
         ],
     ],
 
@@ -53,24 +53,20 @@ return [
     | users are actually retrieved out of your database or other storage
     | system used by the application. Typically, Eloquent is utilized.
     |
-    | If you have multiple user tables or models you may configure multiple
-    | providers to represent the model / table. These providers may then
-    | be assigned to any extra authentication guards you have defined.
+    | El sistema de la remisería reemplaza la tabla `users` por defecto de
+    | Laravel por `cuentas` (ver App\Models\Cuenta), que a su vez referencia
+    | a `personas` para los datos personales compartidos entre los tres
+    | roles (cliente, conductor, administrador).
     |
     | Supported: "database", "eloquent"
     |
     */
 
     'providers' => [
-        'users' => [
+        'cuentas' => [
             'driver' => 'eloquent',
-            'model' => env('AUTH_MODEL', User::class),
+            'model' => env('AUTH_MODEL', Cuenta::class),
         ],
-
-        // 'users' => [
-        //     'driver' => 'database',
-        //     'table' => 'users',
-        // ],
     ],
 
     /*
@@ -93,8 +89,8 @@ return [
     */
 
     'passwords' => [
-        'users' => [
-            'provider' => 'users',
+        'cuentas' => [
+            'provider' => 'cuentas',
             'table' => env('AUTH_PASSWORD_RESET_TOKEN_TABLE', 'password_reset_tokens'),
             'expire' => 60,
             'throttle' => 60,
