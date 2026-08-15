@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace App\Enums;
 
 /**
- * Método de pago, según el DER: {efectivo, tarjeta debito, tarjeta credito, qr, cuentaCorriente}.
+ * Método de pago, según el DER: {efectivo, tarjeta debito, tarjeta credito, qr}.
  */
 enum MetodoPago: string
 {
@@ -13,8 +13,6 @@ enum MetodoPago: string
     case TarjetaDebito = 'tarjetaDebito';
     case TarjetaCredito = 'tarjetaCredito';
     case Qr = 'qr';
-    case CuentaCorriente = 'cuentaCorriente';
-
     public function label(): string
     {
         return match ($this) {
@@ -22,7 +20,6 @@ enum MetodoPago: string
             self::TarjetaDebito => 'Tarjeta de débito',
             self::TarjetaCredito => 'Tarjeta de crédito',
             self::Qr => 'Código QR',
-            self::CuentaCorriente => 'Cuenta corriente',
         };
     }
 }
