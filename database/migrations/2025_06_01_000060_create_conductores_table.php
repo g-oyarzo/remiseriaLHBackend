@@ -39,8 +39,13 @@ return new class extends Migration
             $table->geography('ubicacion_actual', subtype: 'point', srid: 4326)
                 ->default(DB::raw("(ST_GeomFromText('POINT(-57.9544 -34.9214)', 4326))"));
 
+            // unique(): un vehículo no puede estar asignado a más de un
+            // conductor al mismo tiempo.
+            // MySQL permite múltiples NULL en una columna unique, así que un
+            // conductor sin vehículo asignado sigue funcionando normalmente.
             $table->foreignId('vehiculo_id')
                 ->nullable()
+                ->unique()
                 ->constrained('vehiculos')
                 ->nullOnDelete();
 
