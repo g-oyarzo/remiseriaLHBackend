@@ -6,6 +6,7 @@ namespace App\Models;
 
 use App\Casts\PointCast;
 use App\Enums\EstadoConductor;
+use App\Enums\EstadoViaje;
 use App\ValueObjects\Coordinate;
 use Database\Factories\ConductorFactory;
 use Illuminate\Database\Eloquent\Builder;
@@ -91,15 +92,34 @@ class Conductor extends Model
     }
 
     /**
-     * Conductores activos, en servicio y con un vehículo asignado: los
-     * únicos candidatos válidos para el algoritmo de despacho (CU 03).
+     * Conductores activos, en servicio, con un vehículo asignado y SIN un
+     * viaje en curso: los únicos candidatos válidos para el algoritmo de
+     * despacho (CU 03).
+     *
+     * Corrección de auditoría 2.2: antes esta condición no excluía a los
+     * conductores que ya tenían un viaje "aceptado" o "en_curso" asignado,
+     * lo que permitía que el despachador les ofreciera un segundo viaje en
+     * simultáneo.
+     *
+     * Importante: este scope reduce el riesgo bajo uso normal, pero NO
+     * elimina la condición de carrera bajo concurrencia real (dos
+     * solicitudes de viaje llegando casi al mismo tiempo). Cuando se
+     * implemente el servicio de asignación, la confirmación final del
+     * conductor elegido debe hacerse dentro de una transacción con
+     * `lockForUpdate()` sobre esa fila, re-chequeando que siga disponible
+     * antes de escribir `viajes.conductor_id`.
      *
      * @param  Builder<Conductor>  $query
      * @return Builder<Conductor>
      */
     public function scopeDisponibles(Builder $query): Builder
     {
-        return $query->activos()->enServicio()->whereNotNull('vehiculo_id');
+        return $query->activos()
+            ->enServicio()
+            ->whereNotNull('vehiculo_id')
+            ->whereDoesntHave('viajes', function (Builder $query): void {
+                $query->whereIn('estado', [EstadoViaje::Aceptado, EstadoViaje::EnCurso]);
+            });
     }
 
     /**
