@@ -12,6 +12,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 
+use Laravel\Sanctum\HasApiTokens;
+
 /**
  * Reemplaza al modelo `User` por defecto de Laravel como modelo de
  * autenticación (ver config/auth.php: providers.users.model).
@@ -19,7 +21,7 @@ use Illuminate\Notifications\Notifiable;
 class Cuenta extends Authenticatable
 {
     /** @use HasFactory<CuentaFactory> */
-    use HasFactory, Notifiable;
+    use HasApiTokens, HasFactory, Notifiable;
 
     protected $table = 'cuentas';
 
