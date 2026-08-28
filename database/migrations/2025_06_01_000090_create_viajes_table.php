@@ -6,6 +6,7 @@ use App\Enums\EstadoViaje;
 use App\Enums\TipoViaje;
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
@@ -62,8 +63,10 @@ return new class extends Migration
             $table->index('estado');
             $table->index('tipo');
             $table->index('fecha_viaje');
-            $table->spatialIndex('origen');
-            $table->spatialIndex('destino');
+            if (DB::getDriverName() !== 'sqlite') {
+                $table->spatialIndex('origen');
+                $table->spatialIndex('destino');
+            }
         });
     }
 

@@ -53,7 +53,9 @@ return new class extends Migration
 
             $table->index('estado');
             $table->index('en_servicio');
-            $table->spatialIndex('ubicacion_actual');
+            if (DB::getDriverName() !== 'sqlite') {
+                $table->spatialIndex('ubicacion_actual');
+            }
         });
     }
 
