@@ -27,6 +27,49 @@ services:
         depends_on:
             - mysql
             - redis
+    # Corrección de auditoría (HALL-019): antes no había ningún proceso que
+    # corriera `php artisan queue:work` de forma continua. Como
+    # UbicacionConductorActualizada y NuevoMensajeViaje implementan
+    # ShouldBroadcast (no ShouldBroadcastNow), sin un worker corriendo el
+    # tracking GPS y el chat en tiempo real simplemente no llegan a los
+    # clientes aunque Reverb esté bien configurado. `restart: unless-stopped`
+    # cumple el rol que en un servidor tradicional haría supervisord/systemd.
+    queue:
+        image: 'sail-8.5/app'
+        extra_hosts:
+            - 'host.docker.internal:host-gateway'
+        environment:
+            WWWUSER: '${WWWUSER}'
+            LARAVEL_SAIL: 1
+        volumes:
+            - '.:/var/www/html'
+        networks:
+            - sail
+        depends_on:
+            - mysql
+            - redis
+        restart: unless-stopped
+        entrypoint: ['php', '/var/www/html/artisan', 'queue:work', '--tries=3', '--backoff=5']
+    # Corrección de auditoría (HALL-006): el scheduler de Laravel
+    # (routes/console.php -> viajes:despachar-programados, cada minuto) solo
+    # se ejecuta si algo lo dispara continuamente. `schedule:work` cumple esa
+    # función sin depender de crontab en el host.
+    scheduler:
+        image: 'sail-8.5/app'
+        extra_hosts:
+            - 'host.docker.internal:host-gateway'
+        environment:
+            WWWUSER: '${WWWUSER}'
+            LARAVEL_SAIL: 1
+        volumes:
+            - '.:/var/www/html'
+        networks:
+            - sail
+        depends_on:
+            - mysql
+            - redis
+        restart: unless-stopped
+        entrypoint: ['php', '/var/www/html/artisan', 'schedule:work']
     redis:
         image: 'redis:alpine'
         ports:
