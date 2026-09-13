@@ -37,12 +37,19 @@ class Conductor extends Model
         'domicilio_calle',
         'domicilio_numero',
         'foto',
-        'calificacion',
         'estado',
         'en_servicio',
         'ubicacion_actual',
         'vehiculo_id',
     ];
+
+    // HALL-017: 'calificacion' se removió deliberadamente de $fillable.
+    // Se recalcula únicamente en ViajeController::calificar() vía
+    // Conductor::query()->update(['calificacion' => ...]), que no pasa por
+    // mass assignment de un modelo ya hidratado desde un request. Si algún
+    // endpoint futuro permitiera actualizar el propio legajo del conductor
+    // con datos del request, mantenerla fuera de $fillable evita que un
+    // conductor pueda manipular directamente su propia calificación.
 
     /**
      * @return array<string, string>
