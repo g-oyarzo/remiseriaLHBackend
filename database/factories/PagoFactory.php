@@ -30,4 +30,15 @@ class PagoFactory extends Factory
             'fecha_pago' => now(),
         ];
     }
+
+    /**
+     * HALL-008: un pago pendiente todavía no tiene fecha de confirmación.
+     */
+    public function pendiente(): static
+    {
+        return $this->state(fn (array $attributes): array => [
+            'estado' => EstadoPago::Pendiente,
+            'fecha_pago' => null,
+        ]);
+    }
 }

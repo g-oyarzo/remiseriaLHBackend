@@ -15,10 +15,13 @@ use App\OpenApi\Schemas\ErrorResponse;
 use App\OpenApi\Schemas\PagoSchema;
 use App\OpenApi\Schemas\RegistrarPagoRequest as RegistrarPagoRequestSchema;
 use App\OpenApi\Schemas\ValidationErrorResponse;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rules\Enum;
 use OpenApi\Attributes as OA;
+use RuntimeException;
 use Symfony\Component\HttpFoundation\Response;
 
 class PagoController extends Controller
@@ -52,23 +55,11 @@ class PagoController extends Controller
         $cuenta = $request->user();
 
         // Admin o el conductor del viaje pueden registrar el pago.
-        if ($cuenta->rol === RolPersona::Cliente || 
+        if ($cuenta->rol === RolPersona::Cliente ||
             ($cuenta->rol === RolPersona::Conductor && $viaje->conductor_id !== $cuenta->persona_id)) {
             return response()->json([
                 'message' => 'No tiene permisos para registrar un pago para este viaje.',
             ], Response::HTTP_FORBIDDEN);
-        }
-
-        if ($viaje->estado !== EstadoViaje::Finalizado) {
-            return response()->json([
-                'message' => 'Solo se puede registrar un pago para viajes finalizados.',
-            ], Response::HTTP_CONFLICT);
-        }
-
-        if ($viaje->pago()->exists()) {
-            return response()->json([
-                'message' => 'El viaje ya tiene un pago registrado.',
-            ], Response::HTTP_CONFLICT);
         }
 
         $validated = $request->validate([
@@ -76,12 +67,52 @@ class PagoController extends Controller
             'monto' => ['required', 'numeric', 'min:0'],
         ]);
 
-        $pago = Pago::query()->create([
-            'viaje_id' => $viaje->id,
-            'metodo_pago' => $validated['metodo_pago'],
-            'monto' => $validated['monto'],
-            'estado' => EstadoPago::Confirmado,
-        ]);
+        // Corrección de auditoría (HALL-003): antes se comprobaba
+        // "¿ya existe un pago?" y se creaba el registro en dos pasos sin
+        // ningún lock, por lo que dos requests simultáneas (doble tap del
+        // conductor, reintento de red, etc.) podían pasar ambas la
+        // verificación antes de que cualquiera insertara el pago. La tabla
+        // tiene un unique(viaje_id) como red de seguridad a nivel de BD,
+        // pero eso solo evitaba el duplicado con un 500 no controlado.
+        //
+        // Ahora todo el ciclo lectura+escritura ocurre dentro de una única
+        // transacción con SELECT ... FOR UPDATE sobre la fila del viaje:
+        // la segunda request queda bloqueada hasta que la primera confirma,
+        // y al reanudar vuelve a leer el estado ya actualizado (con el pago
+        // recién creado), por lo que su propia verificación de "¿ya tiene
+        // pago?" ahora sí lo detecta y devuelve 409 en lugar de duplicar.
+        try {
+            $pago = DB::transaction(function () use ($viaje, $validated): Pago {
+                $viajeActual = Viaje::query()->lockForUpdate()->findOrFail($viaje->id);
+
+                if ($viajeActual->estado !== EstadoViaje::Finalizado) {
+                    throw new RuntimeException('Solo se puede registrar un pago para viajes finalizados.');
+                }
+
+                if ($viajeActual->pago()->exists()) {
+                    throw new RuntimeException('El viaje ya tiene un pago registrado.');
+                }
+
+                return Pago::query()->create([
+                    'viaje_id' => $viajeActual->id,
+                    'metodo_pago' => $validated['metodo_pago'],
+                    'monto' => $validated['monto'],
+                    'estado' => EstadoPago::Confirmado,
+                    // HALL-008: se fija explícitamente en el momento de la
+                    // confirmación en lugar de depender del useCurrent() de
+                    // la migración (ver 2025_06_01_000100_create_pagos_table).
+                    'fecha_pago' => now(),
+                ]);
+            });
+        } catch (ModelNotFoundException) {
+            return response()->json([
+                'message' => 'Viaje inexistente.',
+            ], Response::HTTP_NOT_FOUND);
+        } catch (RuntimeException $e) {
+            return response()->json([
+                'message' => $e->getMessage(),
+            ], Response::HTTP_CONFLICT);
+        }
 
         return response()->json([
             'message' => 'Pago registrado exitosamente.',
