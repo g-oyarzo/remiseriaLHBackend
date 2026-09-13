@@ -118,9 +118,22 @@ class ViajeController extends Controller
     )]
     public function show(Request $request, Viaje $viaje): JsonResponse
     {
-        $this->authorizeAccess($request, $viaje);
+        $this->authorize('ver', $viaje);
 
-        $viaje->load(['cliente.persona', 'conductor.persona', 'vehiculo', 'tarifa', 'pago', 'mensajes']);
+        // Corrección de auditoría (sección 7, rendimiento): antes se
+        // cargaban TODOS los mensajes del viaje sin límite. Con un chat
+        // activo de un viaje largo, o simplemente con el tiempo, esto crece
+        // sin cota. Se muestran acá solo los últimos 30 como vista previa;
+        // el historial completo y paginado está en
+        // GET /viajes/{viaje}/mensajes (MensajeController::index()).
+        $viaje->load([
+            'cliente.persona',
+            'conductor.persona',
+            'vehiculo',
+            'tarifa',
+            'pago',
+            'mensajes' => fn ($query) => $query->latest()->limit(30),
+        ]);
 
         return response()->json(['data' => $viaje]);
     }
@@ -188,7 +201,14 @@ class ViajeController extends Controller
         );
 
         // Estimación de distancia para cálculo de costo.
-        $distanciaKm = $origen->distanciaEnMetrosHacia($destino) / 1000;
+        //
+        // Corrección de auditoría (HALL-010): distanciaEnMetrosHacia() da la
+        // distancia en línea recta, que subestima sistemáticamente el
+        // recorrido real en una ciudad con cuadrícula de calles. Se aplica
+        // un factor de corrección configurable (ver config/remiseria.php)
+        // hasta integrar una API de ruteo real.
+        $distanciaLineaRectaKm = $origen->distanciaEnMetrosHacia($destino) / 1000;
+        $distanciaKm = $distanciaLineaRectaKm * (float) config('remiseria.factor_correccion_distancia');
         $costoEstimado = $tarifa->calcularCosto($distanciaKm);
 
         $viaje = Viaje::query()->create([
@@ -323,7 +343,23 @@ class ViajeController extends Controller
     )]
     public function iniciar(Request $request, Viaje $viaje): JsonResponse
     {
-        $this->authorizeAccess($request, $viaje);
+        // Corrección de auditoría (HALL-005): antes se llamaba primero a
+        // authorizeAccess() (que para un cliente devuelve true si es el
+        // dueño del viaje) y solo después se verificaba que quien hace la
+        // request sea el conductor asignado. La ruta ya está protegida por
+        // el middleware role:conductor (routes/api.php), pero si ese
+        // middleware llegara a faltar por un error de configuración futuro,
+        // el orden anterior dejaba a authorizeAccess() como única barrera,
+        // y esta sí deja pasar al cliente dueño del viaje. Ahora el rol se
+        // verifica primero, de forma explícita e independiente del
+        // middleware (defensa en profundidad).
+        if ($request->user()->rol !== RolPersona::Conductor) {
+            return response()->json([
+                'message' => 'Solo conductores pueden iniciar viajes.',
+            ], Response::HTTP_FORBIDDEN);
+        }
+
+        $this->authorize('ver', $viaje);
 
         if ($viaje->estado !== EstadoViaje::Aceptado) {
             return response()->json([
@@ -368,7 +404,7 @@ class ViajeController extends Controller
     )]
     public function finalizar(Request $request, Viaje $viaje): JsonResponse
     {
-        $this->authorizeAccess($request, $viaje);
+        $this->authorize('ver', $viaje);
 
         if ($viaje->estado !== EstadoViaje::EnCurso) {
             return response()->json([
@@ -415,7 +451,7 @@ class ViajeController extends Controller
     )]
     public function cancelar(Request $request, Viaje $viaje): JsonResponse
     {
-        $this->authorizeAccess($request, $viaje);
+        $this->authorize('ver', $viaje);
 
         if ($viaje->estado->esFinal()) {
             return response()->json([
@@ -497,16 +533,34 @@ class ViajeController extends Controller
 
         $viaje->update(['calificacion' => $validated['calificacion']]);
 
-        // Actualizar calificación promedio del conductor.
+        // Corrección de auditoría (HALL-018): antes el promedio se
+        // recalculaba con avg() fuera de cualquier transacción o lock. Dos
+        // viajes del mismo conductor calificados casi al mismo tiempo podían
+        // leer el mismo promedio "viejo" antes de que cualquiera de los dos
+        // updates se aplicara, y el UPDATE que terminara ejecutándose último
+        // pisaba el resultado del otro con un promedio que no reflejaba
+        // ambas calificaciones.
+        //
+        // Ahora el recálculo ocurre dentro de una transacción que bloquea
+        // (`lockForUpdate`) la fila del conductor: la segunda calificación
+        // espera a que la primera termine de escribir su promedio antes de
+        // volver a leer y recalcular, por lo que ambas quedan reflejadas.
         if ($viaje->conductor_id) {
-            $promedio = Viaje::query()
-                ->where('conductor_id', $viaje->conductor_id)
-                ->whereNotNull('calificacion')
-                ->avg('calificacion');
+            DB::transaction(function () use ($viaje): void {
+                Conductor::query()
+                    ->where('persona_id', $viaje->conductor_id)
+                    ->lockForUpdate()
+                    ->first();
 
-            Conductor::query()
-                ->where('persona_id', $viaje->conductor_id)
-                ->update(['calificacion' => round((float) $promedio, 2)]);
+                $promedio = Viaje::query()
+                    ->where('conductor_id', $viaje->conductor_id)
+                    ->whereNotNull('calificacion')
+                    ->avg('calificacion');
+
+                Conductor::query()
+                    ->where('persona_id', $viaje->conductor_id)
+                    ->update(['calificacion' => round((float) $promedio, 2)]);
+            });
         }
 
         return response()->json([
@@ -546,28 +600,10 @@ class ViajeController extends Controller
     {
         $viajes = Viaje::query()
             ->with(['cliente.persona', 'tarifa'])
-            ->pendientes()
+            ->listosParaDespacho()
             ->orderBy('fecha_viaje')
             ->paginate(15);
 
         return response()->json($viajes);
-    }
-
-    /**
-     * Verifica que el usuario tenga acceso a un viaje específico (protección IDOR).
-     */
-    private function authorizeAccess(Request $request, Viaje $viaje): void
-    {
-        $cuenta = $request->user();
-
-        $autorizado = match ($cuenta->rol) {
-            RolPersona::Administrador => true,
-            RolPersona::Cliente => $viaje->cliente_id === $cuenta->persona_id,
-            RolPersona::Conductor => $viaje->conductor_id === $cuenta->persona_id,
-        };
-
-        if (! $autorizado) {
-            abort(Response::HTTP_FORBIDDEN, 'No tiene acceso a este viaje.');
-        }
     }
 }
