@@ -83,7 +83,17 @@ return [
                     'scheme' => env('REVERB_SCHEME', 'https'),
                     'useTLS' => env('REVERB_SCHEME', 'https') === 'https',
                 ],
-                'allowed_origins' => ['*'],
+                // Corrección de auditoría (HALL-023): antes era ['*'] fijo,
+                // permitiendo que cualquier dominio abriera conexiones
+                // WebSocket. En producción, definir REVERB_ALLOWED_ORIGINS
+                // con una lista separada por comas (ej:
+                // "https://app.remiserialh.com,https://admin.remiserialh.com").
+                // Si no se define, se mantiene '*' para no romper entornos
+                // de desarrollo/demo.
+                'allowed_origins' => array_filter(array_map(
+                    'trim',
+                    explode(',', env('REVERB_ALLOWED_ORIGINS', '*'))
+                )),
                 'ping_interval' => env('REVERB_APP_PING_INTERVAL', 60),
                 'activity_timeout' => env('REVERB_APP_ACTIVITY_TIMEOUT', 30),
                 'max_message_size' => env('REVERB_APP_MAX_MESSAGE_SIZE', 10_000),

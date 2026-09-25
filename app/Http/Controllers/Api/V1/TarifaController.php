@@ -13,6 +13,7 @@ use App\OpenApi\Schemas\TarifaSchema;
 use App\OpenApi\Schemas\ValidationErrorResponse;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use OpenApi\Attributes as OA;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -109,22 +110,39 @@ class TarifaController extends Controller
             'zona' => ['nullable', 'string', 'max:60'],
         ]);
 
-        // Desactivar la tarifa vigente actualmente
-        $tarifaAnterior = Tarifa::vigente();
-        if ($tarifaAnterior) {
-            $tarifaAnterior->update([
-                'activa' => false,
-                'vigente_hasta' => now(),
-            ]);
-        }
+        // Corrección de auditoría (HALL-009): antes se leía la tarifa
+        // vigente y se desactivaba en un paso, y se creaba la nueva en otro,
+        // sin transacción ni lock. Dos administradores configurando una
+        // tarifa nueva casi al mismo tiempo podían terminar con dos filas
+        // "activa = true" simultáneamente (ambas leen la misma tarifa
+        // vigente antes de que cualquiera la desactive).
+        //
+        // Ahora todo el ciclo ocurre dentro de una transacción, bloqueando
+        // (`lockForUpdate`) cualquier fila actualmente activa: la segunda
+        // request espera a que la primera confirme y, al continuar, ya no
+        // encuentra ninguna fila activa que bloquear, por lo que ambas
+        // terminan aplicándose en serie y solo la última queda vigente.
+        $nuevaTarifa = DB::transaction(function () use ($validated): Tarifa {
+            Tarifa::query()
+                ->where('activa', true)
+                ->lockForUpdate()
+                ->update([
+                    'activa' => false,
+                    'vigente_hasta' => now(),
+                ]);
 
-        $nuevaTarifa = Tarifa::query()->create([
-            'precio_base' => $validated['precio_base'],
-            'precio_por_km' => $validated['precio_por_km'],
-            'zona' => $validated['zona'] ?? null,
-            'activa' => true,
-            'vigente_desde' => now(),
-        ]);
+            return Tarifa::query()->create([
+                'precio_base' => $validated['precio_base'],
+                'precio_por_km' => $validated['precio_por_km'],
+                'zona' => $validated['zona'] ?? null,
+                'activa' => true,
+                'vigente_desde' => now(),
+            ]);
+        });
+
+        // Fase 4 (rendimiento): Tarifa::vigente() se cachea (ver el modelo);
+        // hay que invalidar esa cache al cambiar la tarifa activa.
+        Tarifa::olvidarVigenteEnCache();
 
         return response()->json([
             'message' => 'Nueva tarifa configurada exitosamente.',

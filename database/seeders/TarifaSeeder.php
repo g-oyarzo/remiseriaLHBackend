@@ -22,5 +22,7 @@ class TarifaSeeder extends Seeder
             'vigente_desde' => now(),
             'vigente_hasta' => null,
         ]);
+
+        Tarifa::olvidarVigenteEnCache();
     }
 }

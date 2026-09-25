@@ -57,18 +57,36 @@ Route::middleware(['auth:sanctum', 'role:cliente'])->prefix('cliente')->group(fu
 Route::middleware(['auth:sanctum', 'role:conductor'])->prefix('conductor')->group(function () {
     Route::patch('/estado-servicio', [ConductorController::class, 'toggleServicio']);
     Route::patch('/ubicacion', [UbicacionController::class, 'update']);
-    
+
     Route::get('/viajes/pendientes', [ViajeController::class, 'pendientes']);
     Route::patch('/viajes/{viaje}/aceptar', [ViajeController::class, 'aceptar']);
     Route::patch('/viajes/{viaje}/iniciar', [ViajeController::class, 'iniciar']);
     Route::patch('/viajes/{viaje}/finalizar', [ViajeController::class, 'finalizar']);
-    Route::post('/viajes/{viaje}/pago', [PagoController::class, 'store']);
 });
 
+// Corrección: PagoController::store() está escrito para permitir tanto al
+// conductor asignado como a un administrador ("Admin o el conductor del
+// viaje pueden registrar el pago"), pero esta ruta vivía antes dentro del
+// grupo role:conductor exclusivo de arriba, así que un admin nunca podía
+// alcanzarla: el middleware lo bloqueaba con 403 antes de llegar al
+// controlador, sin importar lo que dijera su lógica interna.
+Route::middleware(['auth:sanctum', 'role:conductor,administrador'])
+    ->post('/conductor/viajes/{viaje}/pago', [PagoController::class, 'store']);
+
 // Rutas Administrador
+Route::middleware(['auth:sanctum', 'role:administrador'])->group(function () {
+    // Corrección: ConductorController::cercanos() estaba completamente
+    // implementado (con su propio docblock "GET /api/v1/conductores/cercanos")
+    // pero nunca se había registrado ninguna ruta hacia él, por lo que era
+    // inalcanzable desde afuera. Se restringe a administradores porque su
+    // propio docblock indica que es "para despachador".
+    Route::get('/conductores/cercanos', [ConductorController::class, 'cercanos']);
+});
+
 Route::middleware(['auth:sanctum', 'role:administrador'])->prefix('admin')->group(function () {
     Route::apiResource('/clientes', ClienteController::class)->only(['index', 'show']);
-    Route::apiResource('/conductores', ConductorController::class)->only(['index', 'show']);
+    Route::apiResource('/conductores', ConductorController::class)->only(['index', 'show', 'store']);
+    Route::patch('/conductores/{conductor}/estado', [ConductorController::class, 'actualizarEstado']);
     Route::apiResource('/vehiculos', VehiculoController::class);
     
     Route::get('/tarifas', [TarifaController::class, 'index']);
