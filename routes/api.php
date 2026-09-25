@@ -22,8 +22,10 @@ use Illuminate\Support\Facades\Route;
 */
 
 // Rutas Públicas
-Route::post('/auth/login', [AuthController::class, 'login']);
-Route::post('/auth/register', [AuthController::class, 'register']);
+Route::middleware('throttle:6,1')->group(function () {
+    Route::post('/auth/login', [AuthController::class, 'login']);
+    Route::post('/auth/register', [AuthController::class, 'register']);
+});
 
 // Rutas Autenticadas (cualquier rol)
 Route::middleware('auth:sanctum')->group(function () {

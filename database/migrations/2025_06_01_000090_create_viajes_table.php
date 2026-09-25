@@ -63,6 +63,8 @@ return new class extends Migration
             $table->index('estado');
             $table->index('tipo');
             $table->index('fecha_viaje');
+            $table->index(['conductor_id', 'estado'], 'viajes_conductor_estado_index');
+            $table->index('cliente_id', 'viajes_cliente_id_index');
             if (DB::getDriverName() !== 'sqlite') {
                 $table->spatialIndex('origen');
                 $table->spatialIndex('destino');

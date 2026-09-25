@@ -4,10 +4,18 @@ declare(strict_types=1);
 
 namespace App\Enums;
 
+use OpenApi\Attributes as OA;
+
 /**
  * Estados posibles de un viaje, según el DER: {solicitado, aceptado, en curso,
  * finalizado, cancelado}.
  */
+#[OA\Schema(
+    schema: 'EstadoViajeEnum',
+    type: 'string',
+    enum: ['solicitado', 'aceptado', 'en_curso', 'finalizado', 'cancelado'],
+    example: 'solicitado',
+)]
 enum EstadoViaje: string
 {
     case Solicitado = 'solicitado';

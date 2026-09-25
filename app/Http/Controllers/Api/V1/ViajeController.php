@@ -12,11 +12,18 @@ use App\Models\Conductor;
 use App\Models\Pago;
 use App\Models\Tarifa;
 use App\Models\Viaje;
+use App\OpenApi\Schemas\CalificarViajeRequest as CalificarViajeRequestSchema;
+use App\OpenApi\Schemas\CrearViajeRequest as CrearViajeRequestSchema;
+use App\OpenApi\Schemas\ErrorResponse;
+use App\OpenApi\Schemas\PaginationMeta;
+use App\OpenApi\Schemas\ValidationErrorResponse;
+use App\OpenApi\Schemas\ViajeSchema;
 use App\ValueObjects\Coordinate;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rules\Enum;
+use OpenApi\Attributes as OA;
 use Symfony\Component\HttpFoundation\Response;
 
 class ViajeController extends Controller
@@ -29,6 +36,33 @@ class ViajeController extends Controller
      * - Cliente: solo los propios
      * - Conductor: solo los asignados
      */
+    #[OA\Get(
+        path: '/viajes',
+        summary: 'Listar viajes',
+        description: 'Devuelve los viajes visibles para el usuario autenticado: todos si es administrador, solo los propios si es cliente, o solo los asignados si es conductor.',
+        tags: ['Viajes'],
+        security: [['bearerAuth' => []]],
+        parameters: [
+            new OA\Parameter(name: 'estado', in: 'query', required: false, schema: new OA\Schema(ref: EstadoViaje::class)),
+            new OA\Parameter(name: 'tipo', in: 'query', required: false, schema: new OA\Schema(ref: TipoViaje::class)),
+            new OA\Parameter(name: 'per_page', in: 'query', required: false, schema: new OA\Schema(type: 'integer', default: 15)),
+        ],
+        responses: [
+            new OA\Response(
+                response: 200,
+                description: 'OK.',
+                content: new OA\JsonContent(
+                    allOf: [
+                        new OA\Schema(ref: PaginationMeta::class),
+                        new OA\Schema(properties: [
+                            new OA\Property(property: 'data', type: 'array', items: new OA\Items(ref: ViajeSchema::class)),
+                        ]),
+                    ],
+                ),
+            ),
+            new OA\Response(response: 401, description: 'No autenticado.', content: new OA\JsonContent(ref: ErrorResponse::class)),
+        ],
+    )]
     public function index(Request $request): JsonResponse
     {
         $cuenta = $request->user();
@@ -66,6 +100,22 @@ class ViajeController extends Controller
      *
      * Detalle de un viaje. Protección IDOR: solo el cliente, conductor asignado o admin.
      */
+    #[OA\Get(
+        path: '/viajes/{viaje}',
+        summary: 'Detalle de un viaje',
+        tags: ['Viajes'],
+        security: [['bearerAuth' => []]],
+        parameters: [
+            new OA\Parameter(name: 'viaje', in: 'path', required: true, schema: new OA\Schema(type: 'integer')),
+        ],
+        responses: [
+            new OA\Response(response: 200, description: 'OK.', content: new OA\JsonContent(properties: [new OA\Property(property: 'data', ref: ViajeSchema::class)])),
+            new OA\Response(response: 401, description: 'No autenticado.', content: new OA\JsonContent(ref: \App\OpenApi\Schemas\ErrorResponse::class)),
+            new OA\Response(response: 403, description: 'No tiene rol de cliente.', content: new OA\JsonContent(ref: \App\OpenApi\Schemas\ErrorResponse::class)),
+            new OA\Response(response: 422, description: 'Error de validación.', content: new OA\JsonContent(ref: \App\OpenApi\Schemas\ValidationErrorResponse::class)),
+            new OA\Response(response: 500, description: 'Error interno del servidor.', content: new OA\JsonContent(ref: \App\OpenApi\Schemas\ServerErrorResponse::class)),
+        ],
+    )]
     public function show(Request $request, Viaje $viaje): JsonResponse
     {
         $this->authorizeAccess($request, $viaje);
@@ -80,6 +130,23 @@ class ViajeController extends Controller
      *
      * Solicitar un nuevo viaje (solo clientes).
      */
+    #[OA\Post(
+        path: '/cliente/viajes',
+        summary: 'Solicitar un viaje',
+        description: 'Calcula el costo estimado con la tarifa vigente y la distancia en línea recta entre origen y destino (App\ValueObjects\Coordinate::distanciaEnMetrosHacia).',
+        tags: ['Viajes'],
+        security: [['bearerAuth' => []]],
+        requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(ref: CrearViajeRequestSchema::class)),
+        responses: [
+            new OA\Response(response: 201, description: 'Viaje solicitado.', content: new OA\JsonContent(properties: [
+                new OA\Property(property: 'message', type: 'string', example: 'Viaje solicitado exitosamente.'),
+                new OA\Property(property: 'data', ref: ViajeSchema::class),
+            ])),
+            new OA\Response(response: 403, description: 'La cuenta autenticada no tiene rol "cliente".', content: new OA\JsonContent(ref: ErrorResponse::class)),
+            new OA\Response(response: 409, description: 'No hay una tarifa vigente configurada.', content: new OA\JsonContent(ref: ErrorResponse::class)),
+            new OA\Response(response: 422, description: 'Error de validación.', content: new OA\JsonContent(ref: ValidationErrorResponse::class)),
+        ],
+    )]
     public function store(Request $request): JsonResponse
     {
         $cuenta = $request->user();
@@ -152,6 +219,23 @@ class ViajeController extends Controller
      * Un conductor acepta un viaje solicitado. Usa lockForUpdate para evitar
      * doble asignación bajo concurrencia (condición de carrera).
      */
+    #[OA\Patch(
+        path: '/conductor/viajes/{viaje}/aceptar',
+        summary: 'Aceptar un viaje solicitado',
+        description: 'Solo conductores en servicio, con estado "activo" y con vehículo asignado. Usa un lock pesimista (SELECT ... FOR UPDATE) para evitar que dos conductores acepten el mismo viaje bajo concurrencia.',
+        tags: ['Viajes'],
+        security: [['bearerAuth' => []]],
+        parameters: [new OA\Parameter(name: 'viaje', in: 'path', required: true, schema: new OA\Schema(type: 'integer'))],
+        responses: [
+            new OA\Response(response: 200, description: 'Viaje aceptado.', content: new OA\JsonContent(properties: [
+                new OA\Property(property: 'message', type: 'string', example: 'Viaje aceptado.'),
+                new OA\Property(property: 'data', ref: ViajeSchema::class),
+            ])),
+            new OA\Response(response: 403, description: 'La cuenta autenticada no tiene rol "conductor".', content: new OA\JsonContent(ref: ErrorResponse::class)),
+            new OA\Response(response: 404, description: 'Viaje inexistente.', content: new OA\JsonContent(ref: ErrorResponse::class)),
+            new OA\Response(response: 409, description: 'El conductor no está disponible, no tiene vehículo, ya tiene otro viaje activo, o el viaje ya no está disponible.', content: new OA\JsonContent(ref: ErrorResponse::class)),
+        ],
+    )]
     public function aceptar(Request $request, Viaje $viaje): JsonResponse
     {
         $cuenta = $request->user();
@@ -221,6 +305,22 @@ class ViajeController extends Controller
      *
      * El conductor inicia el viaje (transición aceptado -> en_curso).
      */
+    #[OA\Patch(
+        path: '/conductor/viajes/{viaje}/iniciar',
+        summary: 'Iniciar un viaje aceptado',
+        tags: ['Viajes'],
+        security: [['bearerAuth' => []]],
+        parameters: [new OA\Parameter(name: 'viaje', in: 'path', required: true, schema: new OA\Schema(type: 'integer'))],
+        responses: [
+            new OA\Response(response: 200, description: 'Viaje iniciado.', content: new OA\JsonContent(properties: [
+                new OA\Property(property: 'message', type: 'string', example: 'Viaje iniciado.'),
+                new OA\Property(property: 'data', ref: ViajeSchema::class),
+            ])),
+            new OA\Response(response: 403, description: 'No tiene acceso a este viaje, o no es el conductor asignado.', content: new OA\JsonContent(ref: ErrorResponse::class)),
+            new OA\Response(response: 404, description: 'Viaje inexistente.', content: new OA\JsonContent(ref: ErrorResponse::class)),
+            new OA\Response(response: 409, description: 'El viaje no está en estado "aceptado".', content: new OA\JsonContent(ref: ErrorResponse::class)),
+        ],
+    )]
     public function iniciar(Request $request, Viaje $viaje): JsonResponse
     {
         $this->authorizeAccess($request, $viaje);
@@ -250,6 +350,22 @@ class ViajeController extends Controller
      *
      * El conductor finaliza el viaje.
      */
+    #[OA\Patch(
+        path: '/conductor/viajes/{viaje}/finalizar',
+        summary: 'Finalizar un viaje en curso',
+        tags: ['Viajes'],
+        security: [['bearerAuth' => []]],
+        parameters: [new OA\Parameter(name: 'viaje', in: 'path', required: true, schema: new OA\Schema(type: 'integer'))],
+        responses: [
+            new OA\Response(response: 200, description: 'Viaje finalizado.', content: new OA\JsonContent(properties: [
+                new OA\Property(property: 'message', type: 'string', example: 'Viaje finalizado.'),
+                new OA\Property(property: 'data', ref: ViajeSchema::class),
+            ])),
+            new OA\Response(response: 403, description: 'No tiene acceso a este viaje, o no es el conductor asignado ni administrador.', content: new OA\JsonContent(ref: ErrorResponse::class)),
+            new OA\Response(response: 404, description: 'Viaje inexistente.', content: new OA\JsonContent(ref: ErrorResponse::class)),
+            new OA\Response(response: 409, description: 'El viaje no está "en curso".', content: new OA\JsonContent(ref: ErrorResponse::class)),
+        ],
+    )]
     public function finalizar(Request $request, Viaje $viaje): JsonResponse
     {
         $this->authorizeAccess($request, $viaje);
@@ -280,6 +396,23 @@ class ViajeController extends Controller
      *
      * Cancela un viaje. Solo se puede cancelar si no ha finalizado.
      */
+    #[OA\Patch(
+        path: '/viajes/{viaje}/cancelar',
+        summary: 'Cancelar un viaje',
+        description: 'Solo el cliente que lo solicitó o un administrador; los conductores no pueden cancelar. No se puede cancelar un viaje ya finalizado o ya cancelado.',
+        tags: ['Viajes'],
+        security: [['bearerAuth' => []]],
+        parameters: [new OA\Parameter(name: 'viaje', in: 'path', required: true, schema: new OA\Schema(type: 'integer'))],
+        responses: [
+            new OA\Response(response: 200, description: 'Viaje cancelado.', content: new OA\JsonContent(properties: [
+                new OA\Property(property: 'message', type: 'string', example: 'Viaje cancelado.'),
+                new OA\Property(property: 'data', ref: ViajeSchema::class),
+            ])),
+            new OA\Response(response: 403, description: 'Un conductor intentó cancelar, o el cliente no es dueño del viaje.', content: new OA\JsonContent(ref: ErrorResponse::class)),
+            new OA\Response(response: 404, description: 'Viaje inexistente.', content: new OA\JsonContent(ref: ErrorResponse::class)),
+            new OA\Response(response: 409, description: 'El viaje ya finalizó o ya estaba cancelado.', content: new OA\JsonContent(ref: ErrorResponse::class)),
+        ],
+    )]
     public function cancelar(Request $request, Viaje $viaje): JsonResponse
     {
         $this->authorizeAccess($request, $viaje);
@@ -317,6 +450,25 @@ class ViajeController extends Controller
      *
      * El cliente califica un viaje finalizado.
      */
+    #[OA\Patch(
+        path: '/cliente/viajes/{viaje}/calificar',
+        summary: 'Calificar un viaje finalizado',
+        description: 'Recalcula el promedio de calificación del conductor (Conductor.calificacion) tras registrar la nota.',
+        tags: ['Viajes'],
+        security: [['bearerAuth' => []]],
+        parameters: [new OA\Parameter(name: 'viaje', in: 'path', required: true, schema: new OA\Schema(type: 'integer'))],
+        requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(ref: CalificarViajeRequestSchema::class)),
+        responses: [
+            new OA\Response(response: 200, description: 'Viaje calificado.', content: new OA\JsonContent(properties: [
+                new OA\Property(property: 'message', type: 'string', example: 'Viaje calificado.'),
+                new OA\Property(property: 'data', ref: ViajeSchema::class),
+            ])),
+            new OA\Response(response: 403, description: 'La cuenta autenticada no es el cliente del viaje.', content: new OA\JsonContent(ref: ErrorResponse::class)),
+            new OA\Response(response: 404, description: 'Viaje inexistente.', content: new OA\JsonContent(ref: ErrorResponse::class)),
+            new OA\Response(response: 409, description: 'El viaje no está finalizado, o ya fue calificado.', content: new OA\JsonContent(ref: ErrorResponse::class)),
+            new OA\Response(response: 422, description: 'Error de validación.', content: new OA\JsonContent(ref: ValidationErrorResponse::class)),
+        ],
+    )]
     public function calificar(Request $request, Viaje $viaje): JsonResponse
     {
         $cuenta = $request->user();
@@ -368,6 +520,28 @@ class ViajeController extends Controller
      *
      * Viajes solicitados pendientes de asignación (para conductores y admin).
      */
+    #[OA\Get(
+        path: '/conductor/viajes/pendientes',
+        summary: 'Listar viajes pendientes de asignación',
+        description: 'Viajes en estado "solicitado", ordenados por fecha_viaje ascendente, para que un conductor los tome con aceptar().',
+        tags: ['Viajes'],
+        security: [['bearerAuth' => []]],
+        responses: [
+            new OA\Response(
+                response: 200,
+                description: 'OK.',
+                content: new OA\JsonContent(
+                    allOf: [
+                        new OA\Schema(ref: PaginationMeta::class),
+                        new OA\Schema(properties: [
+                            new OA\Property(property: 'data', type: 'array', items: new OA\Items(ref: ViajeSchema::class)),
+                        ]),
+                    ],
+                ),
+            ),
+            new OA\Response(response: 403, description: 'La cuenta autenticada no tiene rol "conductor".', content: new OA\JsonContent(ref: ErrorResponse::class)),
+        ],
+    )]
     public function pendientes(Request $request): JsonResponse
     {
         $viajes = Viaje::query()

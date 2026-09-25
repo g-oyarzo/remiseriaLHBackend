@@ -11,11 +11,20 @@ use App\Models\Cliente;
 use App\Models\Conductor;
 use App\Models\Cuenta;
 use App\Models\Persona;
+use App\OpenApi\Schemas\AuthTokenResponse as AuthTokenResponseSchema;
+use App\OpenApi\Schemas\ErrorResponse;
+use App\OpenApi\Schemas\LoginRequest as LoginRequestSchema;
+use App\OpenApi\Schemas\MeResponse as MeResponseSchema;
+use App\OpenApi\Schemas\RefreshTokenResponse as RefreshTokenResponseSchema;
+use App\OpenApi\Schemas\RegisterRequest as RegisterRequestSchema;
+use App\OpenApi\Schemas\SimpleMessageResponse;
+use App\OpenApi\Schemas\ValidationErrorResponse;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\Rules\Enum;
+use OpenApi\Attributes as OA;
 use Symfony\Component\HttpFoundation\Response;
 
 class AuthController extends Controller
@@ -25,6 +34,22 @@ class AuthController extends Controller
      *
      * Autentica al usuario y devuelve un token Bearer (Sanctum).
      */
+    #[OA\Post(
+        path: '/auth/login',
+        summary: 'Iniciar sesión',
+        description: 'Autentica por email/contraseña. Revoca cualquier token previo de la cuenta (se admite una sola sesión activa a la vez) y emite uno nuevo.',
+        tags: ['Auth'],
+        requestBody: new OA\RequestBody(
+            required: true,
+            content: new OA\JsonContent(ref: LoginRequestSchema::class),
+        ),
+        responses: [
+            new OA\Response(response: 200, description: 'Login exitoso.', content: new OA\JsonContent(ref: AuthTokenResponseSchema::class)),
+            new OA\Response(response: 401, description: 'Credenciales inválidas.', content: new OA\JsonContent(ref: ErrorResponse::class)),
+            new OA\Response(response: 422, description: 'Error de validación.', content: new OA\JsonContent(ref: ValidationErrorResponse::class)),
+            new OA\Response(response: 500, description: 'Error interno del servidor.', content: new OA\JsonContent(ref: \App\OpenApi\Schemas\ServerErrorResponse::class)),
+        ],
+    )]
     public function login(Request $request): JsonResponse
     {
         $validated = $request->validate([
@@ -70,6 +95,20 @@ class AuthController extends Controller
      *
      * Registra un nuevo cliente (único rol auto-registrable).
      */
+    #[OA\Post(
+        path: '/auth/register',
+        summary: 'Registrar un nuevo cliente',
+        description: 'Único rol auto-registrable. Crea Persona + Cliente + Cuenta en una transacción y devuelve un token Bearer.',
+        tags: ['Auth'],
+        requestBody: new OA\RequestBody(
+            required: true,
+            content: new OA\JsonContent(ref: RegisterRequestSchema::class),
+        ),
+        responses: [
+            new OA\Response(response: 201, description: 'Cuenta creada.', content: new OA\JsonContent(ref: AuthTokenResponseSchema::class)),
+            new OA\Response(response: 422, description: 'Error de validación (DNI o email ya registrados, contraseñas no coinciden, etc.).', content: new OA\JsonContent(ref: ValidationErrorResponse::class)),
+        ],
+    )]
     public function register(Request $request): JsonResponse
     {
         $validated = $request->validate([
@@ -124,6 +163,17 @@ class AuthController extends Controller
      *
      * Revoca el token actual.
      */
+    #[OA\Post(
+        path: '/auth/logout',
+        summary: 'Cerrar sesión',
+        description: 'Revoca únicamente el token Bearer usado en esta request (currentAccessToken).',
+        tags: ['Auth'],
+        security: [['bearerAuth' => []]],
+        responses: [
+            new OA\Response(response: 200, description: 'Sesión cerrada.', content: new OA\JsonContent(ref: SimpleMessageResponse::class)),
+            new OA\Response(response: 401, description: 'No autenticado.', content: new OA\JsonContent(ref: ErrorResponse::class)),
+        ],
+    )]
     public function logout(Request $request): JsonResponse
     {
         $request->user()->currentAccessToken()->delete();
@@ -138,6 +188,17 @@ class AuthController extends Controller
      *
      * Devuelve la información del usuario autenticado.
      */
+    #[OA\Get(
+        path: '/auth/me',
+        summary: 'Usuario autenticado',
+        description: 'Devuelve la cuenta autenticada junto con su subtipo (cliente/conductor/administrador) según el rol.',
+        tags: ['Auth'],
+        security: [['bearerAuth' => []]],
+        responses: [
+            new OA\Response(response: 200, description: 'OK.', content: new OA\JsonContent(ref: MeResponseSchema::class)),
+            new OA\Response(response: 401, description: 'No autenticado.', content: new OA\JsonContent(ref: ErrorResponse::class)),
+        ],
+    )]
     public function me(Request $request): JsonResponse
     {
         $cuenta = $request->user();
@@ -167,6 +228,17 @@ class AuthController extends Controller
      *
      * Revoca el token actual y emite uno nuevo (rotación de token).
      */
+    #[OA\Post(
+        path: '/auth/refresh-token',
+        summary: 'Rotar token',
+        description: 'Revoca el token Bearer actual y emite uno nuevo con las mismas abilities (rol).',
+        tags: ['Auth'],
+        security: [['bearerAuth' => []]],
+        responses: [
+            new OA\Response(response: 200, description: 'Token renovado.', content: new OA\JsonContent(ref: RefreshTokenResponseSchema::class)),
+            new OA\Response(response: 401, description: 'No autenticado.', content: new OA\JsonContent(ref: ErrorResponse::class)),
+        ],
+    )]
     public function refreshToken(Request $request): JsonResponse
     {
         $cuenta = $request->user();

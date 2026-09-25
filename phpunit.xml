@@ -21,9 +21,13 @@
         <env name="APP_ENV" value="testing"/>
         <env name="APP_MAINTENANCE_DRIVER" value="file"/>
         <env name="BCRYPT_ROUNDS" value="4"/>
-        <env name="BROADCAST_CONNECTION" value="null"/>
+        <!-- reverb en lugar de null: NullBroadcaster.auth() es un no-op que siempre
+             devuelve 200 y nunca evalúa los closures de channels.php. Con reverb
+             (PusherBroadcaster) los closures sí se ejecutan y el 403 se genera
+             correctamente. Los tests que usan Event::fake() siguen funcionando. -->
+        <env name="BROADCAST_CONNECTION" value="reverb"/>
         <env name="CACHE_STORE" value="array"/>
-        <env name="DB_HOST" value="127.0.0.1"/>
+        <env name="DB_HOST" value="mysql"/>
         <env name="DB_CONNECTION" value="mysql"/>
         <env name="DB_DATABASE" value="remiserialh_testing"/>
         <env name="DB_USERNAME" value="root"/>
