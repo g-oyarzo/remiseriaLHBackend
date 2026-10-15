@@ -193,6 +193,125 @@ class ConductorController extends Controller
     }
 
     /**
+     * PUT /api/v1/admin/conductores/{conductor}
+     *
+     * Reemplazo completo de los datos personales, la cuenta y el vehículo del
+     * conductor. Los campos ausentes no se conservan: vehiculo_id = null o
+     * ausencia de "vehiculo" desasigna el vehículo. La contraseña es opcional
+     * (si no se envía, se mantiene la actual). No cambia el estado: para dar
+     * de baja se usa DELETE.
+     */
+    #[OA\Put(
+        path: '/admin/conductores/{conductor}',
+        summary: 'Actualizar datos de un conductor (reemplazo completo)',
+        description: 'Actualiza Persona, Conductor, Cuenta y Vehículo. Si el vehículo asignado existe y se envía el objeto "vehiculo", se actualiza en lugar de crear uno nuevo. Un conductor eliminado no se puede modificar.',
+        tags: ['Admin - Conductores'],
+        security: [['bearerAuth' => []]],
+        parameters: [new OA\Parameter(name: 'conductor', in: 'path', required: true, description: 'persona_id del conductor.', schema: new OA\Schema(type: 'integer'))],
+        requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(ref: CrearConductorRequestSchema::class)),
+        responses: [
+            new OA\Response(response: 200, description: 'Conductor actualizado.', content: new OA\JsonContent(properties: [
+                new OA\Property(property: 'message', type: 'string', example: 'Conductor actualizado exitosamente.'),
+                new OA\Property(property: 'data', ref: ConductorSchema::class),
+            ])),
+            new OA\Response(response: 403, description: 'La cuenta autenticada no tiene rol "administrador".', content: new OA\JsonContent(ref: ErrorResponse::class)),
+            new OA\Response(response: 404, description: 'Conductor inexistente.', content: new OA\JsonContent(ref: ErrorResponse::class)),
+            new OA\Response(response: 422, description: 'Error de validación, duplicados (dni, email, cuil, patente, vehiculo_id) o conductor eliminado.', content: new OA\JsonContent(ref: ValidationErrorResponse::class)),
+        ],
+    )]
+    public function update(Request $request, Conductor $conductor): JsonResponse
+    {
+        if ($conductor->estado === EstadoConductor::Eliminado) {
+            throw ValidationException::withMessages([
+                'estado' => ['No se puede modificar un conductor dado de baja.'],
+            ]);
+        }
+
+        $validated = $request->validate(
+            $this->reglasConductor($conductor->persona_id, $conductor->vehiculo_id, false),
+        );
+
+        if (! empty($validated['vehiculo_id']) &&
+            Conductor::query()
+                ->where('vehiculo_id', $validated['vehiculo_id'])
+                ->where('persona_id', '!=', $conductor->persona_id)
+                ->exists()) {
+            throw ValidationException::withMessages([
+                'vehiculo_id' => ['Este vehículo ya está asignado a otro conductor.'],
+            ]);
+        }
+
+        $cuenta = Cuenta::query()->where('persona_id', $conductor->persona_id)->first();
+        if (! $cuenta && empty($validated['password'])) {
+            throw ValidationException::withMessages([
+                'password' => ['Se requiere una contraseña: el conductor no tiene cuenta asociada.'],
+            ]);
+        }
+
+        try {
+            DB::transaction(function () use ($conductor, $validated, $cuenta): void {
+                $conductor->persona()->update([
+                    'dni' => $validated['dni'],
+                    'nombre' => $validated['nombre'],
+                    'apellido' => $validated['apellido'],
+                    'telefono' => $validated['telefono'] ?? null,
+                ]);
+
+                $vehiculoId = $validated['vehiculo_id'] ?? null;
+                if (! empty($validated['vehiculo'])) {
+                    $atributos = $this->atributosVehiculo($validated['vehiculo']);
+                    $vehiculoActual = $conductor->vehiculo_id ? Vehiculo::query()->find($conductor->vehiculo_id) : null;
+
+                    if ($vehiculoActual) {
+                        $vehiculoActual->update($atributos);
+                        $vehiculoId = $vehiculoActual->id;
+                    } else {
+                        $vehiculoId = Vehiculo::query()->create($atributos)->id;
+                    }
+                }
+
+                $conductor->update([
+                    'cuil' => $validated['cuil'],
+                    'fecha_nacimiento' => $validated['fecha_nacimiento'],
+                    'domicilio_localidad' => $validated['domicilio_localidad'],
+                    'domicilio_calle' => $validated['domicilio_calle'],
+                    'domicilio_numero' => $validated['domicilio_numero'],
+                    'vehiculo_id' => $vehiculoId,
+                ]);
+
+                // Solo se toca email y contraseña. El rol NO se modifica: un
+                // administrador que también sea conductor no debe degradarse.
+                $datosCuenta = ['email' => $validated['email']];
+                if (! empty($validated['password'])) {
+                    $datosCuenta['password'] = $validated['password']; // cast 'hashed'
+                }
+
+                if ($cuenta) {
+                    $cuenta->update($datosCuenta);
+                } else {
+                    Cuenta::query()->create($datosCuenta + [
+                        'persona_id' => $conductor->persona_id,
+                        'rol' => RolPersona::Conductor,
+                    ]);
+                }
+            });
+        } catch (QueryException $e) {
+            if ($e->getCode() === '23000') {
+                throw ValidationException::withMessages([
+                    'dni' => ['No fue posible actualizar el conductor: verifique que el dni, email, cuil, patente o vehículo no estén ya en uso.'],
+                ]);
+            }
+
+            throw $e;
+        }
+
+        return response()->json([
+            'message' => 'Conductor actualizado exitosamente.',
+            'data' => $conductor->fresh(['persona.cuenta', 'vehiculo.marca']),
+        ]);
+    }
+
+    /**
      * Reglas compartidas por alta (POST) y reemplazo (PUT). Cuando se pasa
      * $personaId, las unicidades ignoran el registro propio: reenviar los
      * mismos datos de un conductor no devuelve 422.
