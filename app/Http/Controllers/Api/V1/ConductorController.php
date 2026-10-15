@@ -5,12 +5,15 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Api\V1;
 
 use App\Enums\EstadoConductor;
+use App\Enums\EstadoViaje;
 use App\Enums\RolPersona;
+use App\Enums\TipoViaje;
 use App\Http\Controllers\Controller;
 use App\Models\Conductor;
 use App\Models\Cuenta;
 use App\Models\Persona;
 use App\Models\Vehiculo;
+use App\Models\Viaje;
 use App\OpenApi\Schemas\CambiarEstadoConductorRequest as CambiarEstadoConductorRequestSchema;
 use App\OpenApi\Schemas\ConductorSchema;
 use App\OpenApi\Schemas\CrearConductorRequest as CrearConductorRequestSchema;
@@ -393,22 +396,109 @@ class ConductorController extends Controller
             'estado' => ['required', new Enum(EstadoConductor::class)],
         ]);
 
-        $atributos = ['estado' => $validated['estado']];
-
-        // Dar de baja a un conductor debe sacarlo de servicio de inmediato:
-        // no tendría sentido que siguiera apareciendo como disponible para
-        // nuevos despachos (Conductor::scopeDisponibles()) mientras está
-        // "eliminado".
+        // La baja pasa por la misma validación que DELETE (sin viajes activos
+        // ni reservas programadas). Repetirla sobre un conductor ya dado de
+        // baja es una no-op.
         if ($validated['estado'] === EstadoConductor::Eliminado->value) {
-            $atributos['en_servicio'] = false;
+            if ($conductor->estado !== EstadoConductor::Eliminado) {
+                $this->darDeBaja($conductor);
+            }
+        } else {
+            $conductor->update(['estado' => $validated['estado']]);
         }
-
-        $conductor->update($atributos);
 
         return response()->json([
             'message' => 'Estado del conductor actualizado.',
             'data' => $conductor->fresh(['persona.cuenta', 'vehiculo.marca']),
         ]);
+    }
+
+    /**
+     * DELETE /api/v1/admin/conductores/{conductor}
+     *
+     * Baja lógica: el legajo no se borra. Se rechaza si el conductor tiene
+     * viajes activos o reservas programadas vigentes.
+     */
+    #[OA\Delete(
+        path: '/admin/conductores/{conductor}',
+        summary: 'Dar de baja lógica a un conductor',
+        description: 'Cambia el estado a "eliminado", lo saca de servicio y libera su vehículo. No borra el registro. Se rechaza (422) si tiene viajes aceptados o en curso, o reservas programadas vigentes (tipo programado en estado solicitado o aceptado con fecha futura).',
+        tags: ['Admin - Conductores'],
+        security: [['bearerAuth' => []]],
+        parameters: [new OA\Parameter(name: 'conductor', in: 'path', required: true, description: 'persona_id del conductor.', schema: new OA\Schema(type: 'integer'))],
+        responses: [
+            new OA\Response(response: 200, description: 'Conductor dado de baja.', content: new OA\JsonContent(properties: [
+                new OA\Property(property: 'message', type: 'string', example: 'Conductor dado de baja exitosamente.'),
+                new OA\Property(property: 'data', ref: ConductorSchema::class),
+            ])),
+            new OA\Response(response: 403, description: 'La cuenta autenticada no tiene rol "administrador".', content: new OA\JsonContent(ref: ErrorResponse::class)),
+            new OA\Response(response: 404, description: 'Conductor inexistente.', content: new OA\JsonContent(ref: ErrorResponse::class)),
+            new OA\Response(response: 422, description: 'El conductor ya está eliminado o tiene viajes activos / reservas programadas.', content: new OA\JsonContent(ref: ValidationErrorResponse::class)),
+        ],
+    )]
+    public function destroy(Conductor $conductor): JsonResponse
+    {
+        $this->darDeBaja($conductor);
+
+        return response()->json([
+            'message' => 'Conductor dado de baja exitosamente.',
+            'data' => $conductor->fresh(['persona.cuenta', 'vehiculo.marca']),
+        ]);
+    }
+
+    /**
+     * Aplica la baja lógica en una transacción con bloqueo de fila, para que
+     * una asignación de viaje concurrente no se cuele entre la validación y
+     * el cambio de estado.
+     */
+    private function darDeBaja(Conductor $conductor): void
+    {
+        DB::transaction(function () use ($conductor): void {
+            $bloqueado = Conductor::query()->whereKey($conductor->getKey())->lockForUpdate()->firstOrFail();
+
+            if ($bloqueado->estado === EstadoConductor::Eliminado) {
+                throw ValidationException::withMessages([
+                    'estado' => ['El conductor ya se encuentra dado de baja.'],
+                ]);
+            }
+
+            if ($this->viajesBloqueantesDeBaja($bloqueado)->exists()) {
+                throw ValidationException::withMessages([
+                    'conductor' => ['No se puede dar de baja: el conductor tiene viajes activos o reservas programadas.'],
+                ]);
+            }
+
+            // Sacarlo de servicio evita que siga apareciendo como disponible
+            // para despacho; desasignar el vehículo lo libera para otro
+            // conductor (el registro del vehículo no se borra).
+            $bloqueado->update([
+                'estado' => EstadoConductor::Eliminado,
+                'en_servicio' => false,
+                'vehiculo_id' => null,
+            ]);
+
+            $conductor->setRawAttributes($bloqueado->getAttributes(), true);
+        });
+    }
+
+    /**
+     * Viajes que impiden la baja: activos (aceptado o en curso) o reservas
+     * programadas vigentes (tipo programado, pendientes, con fecha futura).
+     *
+     * @return \Illuminate\Database\Eloquent\Builder<Viaje>
+     */
+    private function viajesBloqueantesDeBaja(Conductor $conductor): \Illuminate\Database\Eloquent\Builder
+    {
+        return Viaje::query()
+            ->where('conductor_id', $conductor->persona_id)
+            ->where(function ($query): void {
+                $query->whereIn('estado', [EstadoViaje::Aceptado, EstadoViaje::EnCurso])
+                    ->orWhere(function ($query): void {
+                        $query->where('tipo', TipoViaje::Programado)
+                            ->whereIn('estado', [EstadoViaje::Solicitado, EstadoViaje::Aceptado])
+                            ->where('fecha_viaje', '>=', now());
+                    });
+            });
     }
 
     /**
