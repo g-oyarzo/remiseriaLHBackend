@@ -24,6 +24,20 @@ use OpenApi\Attributes as OA;
         new OA\Property(property: 'domicilio_calle', type: 'string', maxLength: 100, example: 'Calle 50'),
         new OA\Property(property: 'domicilio_numero', type: 'string', maxLength: 15, example: '1234'),
         new OA\Property(property: 'vehiculo_id', type: 'integer', nullable: true, example: 10, description: 'Opcional. Debe ser un vehículo existente y sin otro conductor asignado.'),
+        new OA\Property(
+            property: 'vehiculo',
+            type: 'object',
+            nullable: true,
+            description: 'Opcional. Crea el vehículo en la misma transacción. Excluyente con vehiculo_id.',
+            required: ['marca_id', 'modelo', 'patente', 'color', 'anio'],
+            properties: [
+                new OA\Property(property: 'marca_id', type: 'integer', example: 1),
+                new OA\Property(property: 'modelo', type: 'string', maxLength: 60, example: 'Etios'),
+                new OA\Property(property: 'patente', type: 'string', maxLength: 10, example: 'AB123CD', description: 'Debe ser única.'),
+                new OA\Property(property: 'color', type: 'string', maxLength: 30, example: 'Blanco'),
+                new OA\Property(property: 'anio', type: 'integer', example: 2019),
+            ],
+        ),
     ],
 )]
 final class CrearConductorRequest

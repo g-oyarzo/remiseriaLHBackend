@@ -10,6 +10,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Conductor;
 use App\Models\Cuenta;
 use App\Models\Persona;
+use App\Models\Vehiculo;
 use App\OpenApi\Schemas\CambiarEstadoConductorRequest as CambiarEstadoConductorRequestSchema;
 use App\OpenApi\Schemas\ConductorSchema;
 use App\OpenApi\Schemas\CrearConductorRequest as CrearConductorRequestSchema;
@@ -23,6 +24,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\Rules\Enum;
 use Illuminate\Validation\ValidationException;
 use OpenApi\Attributes as OA;
@@ -112,7 +114,7 @@ class ConductorController extends Controller
     #[OA\Post(
         path: '/admin/conductores',
         summary: 'Dar de alta a un conductor',
-        description: 'Crea Persona + Conductor + Cuenta (rol "conductor") en una transacción atómica.',
+        description: 'Crea Persona + Conductor + Cuenta (rol "conductor") en una transacción atómica. El vehículo se puede crear en el mismo request (objeto `vehiculo`) o asignar uno existente (`vehiculo_id`); ambos son excluyentes.',
         tags: ['Admin - Conductores'],
         security: [['bearerAuth' => []]],
         requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(ref: CrearConductorRequestSchema::class)),
@@ -127,20 +129,7 @@ class ConductorController extends Controller
     )]
     public function store(Request $request): JsonResponse
     {
-        $validated = $request->validate([
-            'dni' => ['required', 'string', 'max:15', 'unique:personas,dni'],
-            'nombre' => ['required', 'string', 'max:100'],
-            'apellido' => ['required', 'string', 'max:100'],
-            'telefono' => ['nullable', 'string', 'max:30'],
-            'email' => ['required', 'string', 'email', 'max:255', 'unique:cuentas,email'],
-            'password' => ['required', 'string', 'min:8'],
-            'cuil' => ['required', 'string', 'max:15', 'unique:conductores,cuil'],
-            'fecha_nacimiento' => ['required', 'date', 'before:-18 years'],
-            'domicilio_localidad' => ['required', 'string', 'max:100'],
-            'domicilio_calle' => ['required', 'string', 'max:100'],
-            'domicilio_numero' => ['required', 'string', 'max:15'],
-            'vehiculo_id' => ['nullable', 'integer', 'exists:vehiculos,id'],
-        ]);
+        $validated = $request->validate($this->reglasConductor(null, null, true));
 
         // El unique() de conductores.vehiculo_id en BD ya lo garantiza, pero
         // se valida antes también para devolver un 422 claro en lugar de un
@@ -161,6 +150,11 @@ class ConductorController extends Controller
                     'telefono' => $validated['telefono'] ?? null,
                 ]);
 
+                $vehiculoId = $validated['vehiculo_id'] ?? null;
+                if (! empty($validated['vehiculo'])) {
+                    $vehiculoId = Vehiculo::query()->create($this->atributosVehiculo($validated['vehiculo']))->id;
+                }
+
                 $conductor = Conductor::query()->create([
                     'persona_id' => $persona->id,
                     'cuil' => $validated['cuil'],
@@ -168,7 +162,7 @@ class ConductorController extends Controller
                     'domicilio_localidad' => $validated['domicilio_localidad'],
                     'domicilio_calle' => $validated['domicilio_calle'],
                     'domicilio_numero' => $validated['domicilio_numero'],
-                    'vehiculo_id' => $validated['vehiculo_id'] ?? null,
+                    'vehiculo_id' => $vehiculoId,
                 ]);
 
                 Cuenta::query()->create([
@@ -196,6 +190,55 @@ class ConductorController extends Controller
             'message' => 'Conductor creado exitosamente.',
             'data' => $conductor,
         ], Response::HTTP_CREATED);
+    }
+
+    /**
+     * Reglas compartidas por alta (POST) y reemplazo (PUT). Cuando se pasa
+     * $personaId, las unicidades ignoran el registro propio: reenviar los
+     * mismos datos de un conductor no devuelve 422.
+     *
+     * vehiculo_id y vehiculo son excluyentes: se asigna un vehículo existente
+     * o se crea uno nuevo, nunca ambas cosas.
+     *
+     * @return array<string, mixed>
+     */
+    private function reglasConductor(?int $personaId, ?int $vehiculoActualId, bool $esAlta): array
+    {
+        return [
+            'dni' => ['required', 'string', 'max:15', Rule::unique('personas', 'dni')->ignore($personaId)],
+            'nombre' => ['required', 'string', 'max:100'],
+            'apellido' => ['required', 'string', 'max:100'],
+            'telefono' => ['nullable', 'string', 'max:30'],
+            'email' => ['required', 'string', 'email', 'max:255', Rule::unique('cuentas', 'email')->ignore($personaId, 'persona_id')],
+            'password' => $esAlta ? ['required', 'string', 'min:8'] : ['nullable', 'string', 'min:8'],
+            'cuil' => ['required', 'string', 'max:15', Rule::unique('conductores', 'cuil')->ignore($personaId, 'persona_id')],
+            'fecha_nacimiento' => ['required', 'date', 'before:-18 years'],
+            'domicilio_localidad' => ['required', 'string', 'max:100'],
+            'domicilio_calle' => ['required', 'string', 'max:100'],
+            'domicilio_numero' => ['required', 'string', 'max:15'],
+            'vehiculo_id' => ['nullable', 'integer', 'exists:vehiculos,id', 'prohibits:vehiculo'],
+            'vehiculo' => ['nullable', 'array'],
+            'vehiculo.marca_id' => ['required_with:vehiculo', 'integer', 'exists:marcas,id'],
+            'vehiculo.modelo' => ['required_with:vehiculo', 'string', 'max:60'],
+            'vehiculo.patente' => ['required_with:vehiculo', 'string', 'max:10', Rule::unique('vehiculos', 'patente')->ignore($vehiculoActualId)],
+            'vehiculo.color' => ['required_with:vehiculo', 'string', 'max:30'],
+            'vehiculo.anio' => ['required_with:vehiculo', 'integer', 'between:1900,'.(now()->year + 1)],
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $datos
+     * @return array<string, mixed>
+     */
+    private function atributosVehiculo(array $datos): array
+    {
+        return [
+            'marca_id' => $datos['marca_id'],
+            'modelo' => $datos['modelo'],
+            'patente' => $datos['patente'],
+            'color' => $datos['color'],
+            'anio' => $datos['anio'],
+        ];
     }
 
     /**
