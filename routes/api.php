@@ -85,7 +85,11 @@ Route::middleware(['auth:sanctum', 'role:administrador'])->group(function () {
 
 Route::middleware(['auth:sanctum', 'role:administrador'])->prefix('admin')->group(function () {
     Route::apiResource('/clientes', ClienteController::class)->only(['index', 'show']);
-    Route::apiResource('/conductores', ConductorController::class)->only(['index', 'show', 'store']);
+    Route::apiResource('/conductores', ConductorController::class)
+        ->only(['index', 'show', 'store', 'update'])
+        // apiResource singulariza 'conductores' a '{conductore}'. Se mapea explícitamente
+        // para que el binding de ConductorController ($conductor) funcione.
+        ->parameters(['conductores' => 'conductor']);
     Route::patch('/conductores/{conductor}/estado', [ConductorController::class, 'actualizarEstado']);
     Route::apiResource('/vehiculos', VehiculoController::class);
     
