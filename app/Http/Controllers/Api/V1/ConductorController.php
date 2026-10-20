@@ -46,8 +46,10 @@ class ConductorController extends Controller
         tags: ['Admin - Conductores'],
         security: [['bearerAuth' => []]],
         parameters: [
-            new OA\Parameter(name: 'estado', in: 'query', required: false, schema: new OA\Schema(ref: EstadoConductor::class)),
-            new OA\Parameter(name: 'per_page', in: 'query', required: false, schema: new OA\Schema(type: 'integer', default: 15)),
+            new OA\Parameter(name: 'nombre', in: 'query', required: false, description: 'Búsqueda parcial por nombre o apellido.', schema: new OA\Schema(type: 'string', maxLength: 100)),
+            new OA\Parameter(name: 'dni', in: 'query', required: false, description: 'Búsqueda parcial por DNI.', schema: new OA\Schema(type: 'string', maxLength: 15)),
+            new OA\Parameter(name: 'estado', in: 'query', required: false, description: 'Filtra por estado: "activo" o "eliminado". Valor inválido → 422.', schema: new OA\Schema(ref: EstadoConductor::class)),
+            new OA\Parameter(name: 'per_page', in: 'query', required: false, description: 'Entre 1 y 100.', schema: new OA\Schema(type: 'integer', default: 15, minimum: 1, maximum: 100)),
         ],
         responses: [
             new OA\Response(
@@ -63,20 +65,42 @@ class ConductorController extends Controller
                 ),
             ),
             new OA\Response(response: 403, description: 'La cuenta autenticada no tiene rol "administrador".', content: new OA\JsonContent(ref: ErrorResponse::class)),
+            new OA\Response(response: 422, description: 'Parámetros de filtro inválidos.', content: new OA\JsonContent(ref: ValidationErrorResponse::class)),
         ],
     )]
     public function index(Request $request): JsonResponse
     {
+        $validated = $request->validate([
+            'nombre' => ['nullable', 'string', 'max:100'],
+            'dni' => ['nullable', 'string', 'max:15'],
+            'estado' => ['nullable', new Enum(EstadoConductor::class)],
+            'per_page' => ['nullable', 'integer', 'min:1', 'max:100'],
+        ]);
+
         $query = Conductor::query()->with(['persona.cuenta', 'vehiculo.marca']);
 
-        if ($request->has('estado')) {
-            $estado = EstadoConductor::tryFrom($request->input('estado'));
-            if ($estado) {
-                $query->where('estado', $estado);
-            }
+        // Búsqueda parcial (LIKE) escapando los comodines propios de SQL.
+        if (! empty($validated['nombre'])) {
+            $nombre = '%'.addcslashes($validated['nombre'], '%_\\').'%';
+            $query->whereHas('persona', function ($q) use ($nombre): void {
+                $q->where(function ($q) use ($nombre): void {
+                    $q->where('nombre', 'like', $nombre)->orWhere('apellido', 'like', $nombre);
+                });
+            });
         }
 
-        $conductores = $query->paginate((int) $request->input('per_page', 15));
+        if (! empty($validated['dni'])) {
+            $dni = '%'.addcslashes($validated['dni'], '%_\\').'%';
+            $query->whereHas('persona', fn ($q) => $q->where('dni', 'like', $dni));
+        }
+
+        if (! empty($validated['estado'])) {
+            $query->where('estado', $validated['estado']);
+        }
+
+        $conductores = $query
+            ->orderBy('persona_id')
+            ->paginate((int) ($validated['per_page'] ?? 15));
 
         return response()->json($conductores);
     }
