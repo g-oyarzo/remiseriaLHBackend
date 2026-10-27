@@ -10,6 +10,7 @@ use App\Http\Controllers\Api\V1\TarifaController;
 use App\Http\Controllers\Api\V1\UbicacionController;
 use App\Http\Controllers\Api\V1\VehiculoController;
 use App\Http\Controllers\Api\V1\ViajeController;
+use App\Http\Controllers\Api\V1\ZonaTarifariaController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -94,5 +95,11 @@ Route::middleware(['auth:sanctum', 'role:administrador'])->prefix('admin')->grou
     Route::apiResource('/vehiculos', VehiculoController::class);
     
     Route::get('/tarifas', [TarifaController::class, 'index']);
+    Route::put('/tarifas', [TarifaController::class, 'actualizar']);
     Route::post('/tarifas', [TarifaController::class, 'store']);
+    Route::get('/tarifas/historial', [TarifaController::class, 'historial']);
+
+    Route::apiResource('/zonas-tarifarias', ZonaTarifariaController::class)
+        ->only(['index', 'store', 'update', 'destroy'])
+        ->parameters(['zonas-tarifarias' => 'zona']);
 });
