@@ -141,7 +141,7 @@ class Conductor extends Model
         $punto = $origen->toWkt();
 
         $query = $query->selectRaw(
-            'conductores.*, ST_Distance_Sphere(ubicacion_actual, ST_GeomFromText(?, 4326)) as distancia_metros',
+            'conductores.*, ST_Distance_Sphere(ubicacion_actual, '.PointCast::SQL_PUNTO_DESDE_WKT.') as distancia_metros',
             [$punto]
         )->orderBy('distancia_metros');
 
