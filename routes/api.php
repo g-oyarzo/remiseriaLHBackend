@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\ClienteController;
+use App\Http\Controllers\Api\V1\ComprobanteController;
 use App\Http\Controllers\Api\V1\ConductorController;
 use App\Http\Controllers\Api\V1\CotizacionController;
 use App\Http\Controllers\Api\V1\MarcaController;
@@ -43,6 +44,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/viajes', [ViajeController::class, 'index']);
     Route::get('/viajes/{viaje}', [ViajeController::class, 'show']);
     Route::patch('/viajes/{viaje}/cancelar', [ViajeController::class, 'cancelar']);
+    Route::get('/viajes/{viaje}/comprobante', [ComprobanteController::class, 'show']);
     
     // Mensajes
     Route::get('/viajes/{viaje}/mensajes', [MensajeController::class, 'index']);

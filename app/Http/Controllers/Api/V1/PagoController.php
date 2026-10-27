@@ -79,7 +79,7 @@ class PagoController extends Controller
 
         return response()->json([
             'message' => $creado ? 'Pago registrado exitosamente.' : 'El pago ya estaba registrado.',
-            'data' => $pago,
+            'data' => self::conComprobante($pago),
         ], $creado ? Response::HTTP_CREATED : Response::HTTP_OK);
     }
 
@@ -157,6 +157,21 @@ class PagoController extends Controller
             return response()->json(['message' => $e->getMessage()], $e->status);
         }
 
-        return response()->json(['message' => 'Pago conciliado.', 'data' => $pago]);
+        return response()->json(['message' => 'Pago conciliado.', 'data' => self::conComprobante($pago)]);
+    }
+
+    /**
+     * Agrega la URL de descarga del comprobante cuando el pago está
+     * confirmado. La descarga requiere el mismo token Bearer.
+     *
+     * @return array<string, mixed>
+     */
+    private static function conComprobante(Pago $pago): array
+    {
+        return $pago->toArray() + [
+            'comprobante_url' => $pago->estado === EstadoPago::Confirmado
+                ? url("/api/v1/viajes/{$pago->viaje_id}/comprobante")
+                : null,
+        ];
     }
 }
