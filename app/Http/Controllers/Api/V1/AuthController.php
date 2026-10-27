@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Enums\EstadoConductor;
 use App\Enums\RolPersona;
 use App\Http\Controllers\Controller;
 use App\Models\Administrador;
@@ -79,6 +80,15 @@ class AuthController extends Controller
             return response()->json([
                 'message' => 'Credenciales inválidas.',
             ], Response::HTTP_UNAUTHORIZED);
+        }
+
+        // Un conductor dado de baja (CU 13) no debe poder volver a obtener un
+        // token: la baja lógica conserva su cuenta solo por historial.
+        if ($cuenta->rol === RolPersona::Conductor
+            && Conductor::query()->whereKey($cuenta->persona_id)->value('estado') === EstadoConductor::Eliminado) {
+            return response()->json([
+                'message' => 'La cuenta se encuentra deshabilitada.',
+            ], Response::HTTP_FORBIDDEN);
         }
 
         // Revocar tokens anteriores para evitar acumulación (1 sesión activa).
