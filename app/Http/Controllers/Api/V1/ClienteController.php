@@ -23,7 +23,7 @@ class ClienteController extends Controller
         summary: 'Listar clientes',
         tags: ['Admin - Clientes'],
         security: [['bearerAuth' => []]],
-        parameters: [new OA\Parameter(name: 'per_page', in: 'query', required: false, schema: new OA\Schema(type: 'integer', default: 15))],
+        parameters: [new OA\Parameter(name: 'per_page', in: 'query', required: false, description: 'Entre 1 y 100.', schema: new OA\Schema(type: 'integer', default: 15, minimum: 1, maximum: 100))],
         responses: [
             new OA\Response(
                 response: 200,
@@ -44,7 +44,7 @@ class ClienteController extends Controller
     {
         $clientes = Cliente::query()
             ->with('persona.cuenta')
-            ->paginate((int) $request->input('per_page', 15));
+            ->paginate($this->porPagina($request));
 
         return response()->json($clientes);
     }

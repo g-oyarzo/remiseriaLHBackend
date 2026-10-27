@@ -31,7 +31,7 @@ class VehiculoController extends Controller
         security: [['bearerAuth' => []]],
         parameters: [
             new OA\Parameter(name: 'estado', in: 'query', required: false, schema: new OA\Schema(ref: EstadoVehiculo::class)),
-            new OA\Parameter(name: 'per_page', in: 'query', required: false, schema: new OA\Schema(type: 'integer', default: 15)),
+            new OA\Parameter(name: 'per_page', in: 'query', required: false, description: 'Entre 1 y 100.', schema: new OA\Schema(type: 'integer', default: 15, minimum: 1, maximum: 100)),
         ],
         responses: [
             new OA\Response(
@@ -60,7 +60,7 @@ class VehiculoController extends Controller
             }
         }
 
-        $vehiculos = $query->paginate((int) $request->input('per_page', 15));
+        $vehiculos = $query->paginate($this->porPagina($request));
 
         return response()->json($vehiculos);
     }

@@ -46,4 +46,25 @@ return [
 
     'ventana_despacho_programados_minutos' => (int) env('VENTANA_DESPACHO_PROGRAMADOS_MINUTOS', 15),
 
+    /*
+    |--------------------------------------------------------------------------
+    | Límites de frecuencia (solicitudes por minuto)
+    |--------------------------------------------------------------------------
+    |
+    | Se registran como RateLimiter con nombre en AppServiceProvider y se
+    | aplican en routes/api.php con el middleware throttle:<nombre>. "api"
+    | es el límite general de toda la API autenticada.
+    |
+    */
+
+    'rate_limits' => [
+        'api' => (int) env('RATE_LIMIT_API', 120),
+        'ubicacion' => (int) env('RATE_LIMIT_UBICACION', 60),
+        'chat' => (int) env('RATE_LIMIT_CHAT', 30),
+        'cotizar' => (int) env('RATE_LIMIT_COTIZAR', 30),
+        'viajes' => (int) env('RATE_LIMIT_VIAJES', 10),
+        'pagos' => (int) env('RATE_LIMIT_PAGOS', 20),
+        'reportes' => (int) env('RATE_LIMIT_REPORTES', 10),
+    ],
+
 ];

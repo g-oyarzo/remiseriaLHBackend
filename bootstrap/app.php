@@ -26,6 +26,9 @@ return Application::configure(basePath: dirname(__DIR__))
             'role' => \App\Http\Middleware\CheckRole::class,
         ]);
         $middleware->statefulApi();
+        // Límite general por usuario/IP para toda la API (ver
+        // config('remiseria.rate_limits') y AppServiceProvider).
+        $middleware->throttleApi('api');
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->shouldRenderJsonWhen(
