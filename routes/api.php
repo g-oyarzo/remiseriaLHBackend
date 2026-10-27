@@ -108,6 +108,9 @@ Route::middleware(['auth:sanctum', 'role:administrador'])->prefix('admin')->grou
 
     Route::post('/viajes/registrar', [SolicitudViajeController::class, 'registrarTelefonico']);
     Route::post('/viajes/{viaje}/reasignar', [ViajeController::class, 'reasignar']);
+
+    Route::get('/pagos', [PagoController::class, 'index']);
+    Route::patch('/pagos/{pago}/conciliar', [PagoController::class, 'conciliar']);
     
     Route::get('/tarifas', [TarifaController::class, 'index']);
     Route::put('/tarifas', [TarifaController::class, 'actualizar']);

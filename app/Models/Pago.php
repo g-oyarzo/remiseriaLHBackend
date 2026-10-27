@@ -24,7 +24,13 @@ class Pago extends Model
         'viaje_id',
         'metodo_pago',
         'monto',
+        'referencia_externa',
         'estado',
+        'registrado_por_persona_id',
+        'conciliado_por_persona_id',
+        'conciliado_en',
+        'observacion',
+        'historial',
         'fecha_pago',
     ];
 
@@ -38,12 +44,33 @@ class Pago extends Model
             'estado' => EstadoPago::class,
             'monto' => 'decimal:2',
             'fecha_pago' => 'datetime',
+            'conciliado_en' => 'datetime',
+            'historial' => 'array',
         ];
     }
 
     public function viaje(): BelongsTo
     {
         return $this->belongsTo(Viaje::class);
+    }
+
+    /**
+     * Agrega una entrada al historial de transiciones del pago.
+     */
+    public function registrarEnHistorial(string $accion, ?int $personaId, array $extra = []): void
+    {
+        $historial = $this->historial ?? [];
+        $historial[] = [
+            'accion' => $accion,
+            'estado' => $this->estado?->value,
+            'metodo_pago' => $this->metodo_pago?->value,
+            'monto' => $this->monto !== null ? (string) $this->monto : null,
+            'referencia_externa' => $this->referencia_externa,
+            'persona_id' => $personaId,
+            'en' => now()->toIso8601String(),
+        ] + $extra;
+
+        $this->historial = $historial;
     }
 
     /**
