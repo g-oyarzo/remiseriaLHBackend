@@ -23,6 +23,7 @@ use OpenApi\Attributes as OA;
         new OA\Property(property: 'conciliado_por_persona_id', type: 'integer', nullable: true),
         new OA\Property(property: 'conciliado_en', type: 'string', format: 'date-time', nullable: true),
         new OA\Property(property: 'observacion', type: 'string', nullable: true),
+        new OA\Property(property: 'comprobante_url', type: 'string', nullable: true, description: 'Solo en las respuestas de registro y conciliación: URL de GET /viajes/{id}/comprobante cuando el pago está confirmado.'),
         new OA\Property(property: 'historial', type: 'array', nullable: true, items: new OA\Items(type: 'object'), description: 'Transiciones del pago (registro, reintento, conciliación).'),
     ],
 )]
