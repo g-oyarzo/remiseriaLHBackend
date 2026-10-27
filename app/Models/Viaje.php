@@ -6,6 +6,8 @@ namespace App\Models;
 
 use App\Casts\PointCast;
 use App\Enums\EstadoViaje;
+use App\Enums\MetodoCotizacion;
+use App\Enums\MetodoPago;
 use App\Enums\TipoViaje;
 use App\Events\ViajeCambioEstado;
 use Database\Factories\ViajeFactory;
@@ -49,11 +51,24 @@ class Viaje extends Model
         'origen_localidad',
         'origen_calle',
         'origen_numero',
+        'destino_localidad',
+        'destino_calle',
+        'destino_numero',
         'estado',
         'tipo',
+        'metodo_pago',
+        'canal',
+        'registrado_por_persona_id',
         'costo',
+        'precio_base_aplicado',
+        'precio_por_km_aplicado',
+        'distancia_estimada_km',
+        'duracion_estimada_min',
+        'metodo_cotizacion',
+        'zona_tarifaria_id',
         'calificacion',
         'fecha_viaje',
+        'despachado_en',
     ];
 
     /**
@@ -66,9 +81,16 @@ class Viaje extends Model
             'destino' => PointCast::class,
             'estado' => EstadoViaje::class,
             'tipo' => TipoViaje::class,
+            'metodo_pago' => MetodoPago::class,
             'costo' => 'decimal:2',
+            'precio_base_aplicado' => 'decimal:2',
+            'precio_por_km_aplicado' => 'decimal:2',
+            'distancia_estimada_km' => 'float',
+            'duracion_estimada_min' => 'integer',
+            'metodo_cotizacion' => MetodoCotizacion::class,
             'calificacion' => 'integer',
             'fecha_viaje' => 'datetime',
+            'despachado_en' => 'datetime',
         ];
     }
 
@@ -90,6 +112,11 @@ class Viaje extends Model
     public function tarifa(): BelongsTo
     {
         return $this->belongsTo(Tarifa::class);
+    }
+
+    public function zonaTarifaria(): BelongsTo
+    {
+        return $this->belongsTo(ZonaTarifaria::class);
     }
 
     public function pago(): HasOne

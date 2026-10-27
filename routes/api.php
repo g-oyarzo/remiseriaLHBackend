@@ -7,6 +7,7 @@ use App\Http\Controllers\Api\V1\CotizacionController;
 use App\Http\Controllers\Api\V1\MarcaController;
 use App\Http\Controllers\Api\V1\MensajeController;
 use App\Http\Controllers\Api\V1\PagoController;
+use App\Http\Controllers\Api\V1\SolicitudViajeController;
 use App\Http\Controllers\Api\V1\TarifaController;
 use App\Http\Controllers\Api\V1\UbicacionController;
 use App\Http\Controllers\Api\V1\VehiculoController;
@@ -57,7 +58,9 @@ Route::middleware(['auth:sanctum', 'role:cliente,administrador', 'throttle:cotiz
 
 // Rutas Cliente
 Route::middleware(['auth:sanctum', 'role:cliente'])->prefix('cliente')->group(function () {
-    Route::post('/viajes', [ViajeController::class, 'store']);
+    Route::post('/viajes', [ViajeController::class, 'store'])->middleware('throttle:viajes');
+    Route::post('/viajes/solicitar', [SolicitudViajeController::class, 'solicitar'])->middleware('throttle:viajes');
+    Route::post('/viajes/reservar', [SolicitudViajeController::class, 'reservar'])->middleware('throttle:viajes');
     Route::patch('/viajes/{viaje}/calificar', [ViajeController::class, 'calificar']);
 });
 
@@ -100,6 +103,8 @@ Route::middleware(['auth:sanctum', 'role:administrador'])->prefix('admin')->grou
         ->parameters(['conductores' => 'conductor']);
     Route::patch('/conductores/{conductor}/estado', [ConductorController::class, 'actualizarEstado']);
     Route::apiResource('/vehiculos', VehiculoController::class);
+
+    Route::post('/viajes/registrar', [SolicitudViajeController::class, 'registrarTelefonico']);
     
     Route::get('/tarifas', [TarifaController::class, 'index']);
     Route::put('/tarifas', [TarifaController::class, 'actualizar']);

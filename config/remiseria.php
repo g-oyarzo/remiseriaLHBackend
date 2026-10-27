@@ -48,6 +48,23 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Reservas (CU 09)
+    |--------------------------------------------------------------------------
+    |
+    | Una reserva debe pedirse con al menos anticipacion_minima_minutos (un
+    | viaje para dentro de menos tiempo es una solicitud inmediata) y con no
+    | más de anticipacion_maxima_dias. Ambos valores son supuestos operativos
+    | configurables, no reglas tomadas de la documentación del negocio.
+    |
+    */
+
+    'reservas' => [
+        'anticipacion_minima_minutos' => (int) env('RESERVA_ANTICIPACION_MINIMA_MINUTOS', 30),
+        'anticipacion_maxima_dias' => (int) env('RESERVA_ANTICIPACION_MAXIMA_DIAS', 30),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Cotización (CU 02)
     |--------------------------------------------------------------------------
     |
