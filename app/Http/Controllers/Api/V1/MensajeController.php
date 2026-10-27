@@ -7,6 +7,7 @@ namespace App\Http\Controllers\Api\V1;
 use App\Enums\EstadoViaje;
 use App\Events\NuevoMensajeViaje;
 use App\Http\Controllers\Controller;
+use App\Http\Resources\MensajeResource;
 use App\Models\Mensaje;
 use App\Models\Viaje;
 use App\OpenApi\Schemas\EnviarMensajeRequest as EnviarMensajeRequestSchema;
@@ -76,7 +77,7 @@ class MensajeController extends Controller
             ->sortBy('id')
             ->values();
 
-        return response()->json(['data' => $mensajes]);
+        return response()->json(['data' => MensajeResource::collection($mensajes)->resolve($request)]);
     }
 
     /**
@@ -146,7 +147,7 @@ class MensajeController extends Controller
 
         return response()->json([
             'message' => 'Mensaje enviado.',
-            'data' => $mensaje,
+            'data' => MensajeResource::make($mensaje)->resolve($request),
         ], Response::HTTP_CREATED);
     }
 
