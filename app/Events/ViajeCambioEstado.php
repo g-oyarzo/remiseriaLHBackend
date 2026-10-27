@@ -5,37 +5,59 @@ declare(strict_types=1);
 namespace App\Events;
 
 use App\Enums\EstadoViaje;
+use App\Events\Contracts\DifusionEnTiempoReal;
+use Illuminate\Broadcasting\Channel;
+use Illuminate\Broadcasting\InteractsWithSockets;
+use Illuminate\Broadcasting\PrivateChannel;
 use Illuminate\Foundation\Events\Dispatchable;
 
 /**
- * Corrección de auditoría (sección 4.2, "Sin eventos de dominio en
- * transiciones de estado"): antes, cuando un viaje cambiaba de estado
- * (aceptado, iniciado, finalizado, cancelado), no se disparaba ningún
- * evento; toda la lógica quedaba atada directamente a cada método del
- * controlador. Eso impedía agregar suscriptores futuros (notificaciones
- * push, auditoría, estadísticas) sin modificar cada controlador uno por
- * uno.
+ * Se dispara desde Viaje::booted() cada vez que cambia el atributo
+ * `estado`, sin importar desde qué controlador, job o comando se origine.
  *
- * Este evento se dispara automáticamente desde Viaje::booted() cada vez que
- * cambia el atributo `estado`, sin importar desde qué controlador o
- * comando se haya originado el cambio. No implementa ShouldBroadcast: es un
- * evento de dominio interno para listeners de la aplicación (colas de
- * notificaciones, auditoría, etc.), no un mensaje en tiempo real hacia el
- * cliente — para eso ya existen NuevoMensajeViaje y
- * UbicacionConductorActualizada.
+ * Además de evento de dominio, se difunde en el canal privado del viaje
+ * (cliente, conductor asignado y administradores) para que la app del
+ * pasajero se entere en tiempo real de que el viaje fue aceptado, iniciado,
+ * finalizado o cancelado (CU 05). El payload es mínimo a propósito: la app
+ * obtiene el detalle por REST (GET /viajes/{id}).
  *
- * No incluye el estado anterior a propósito: para los casos de uso típicos
- * (notificar, auditar, contar) alcanza con saber a qué estado llegó el
- * viaje; quien necesite el historial completo puede consultar la tabla
- * `viajes` o, más adelante, una tabla de auditoría dedicada.
+ * ShouldDispatchAfterCommit: si el cambio de estado ocurre dentro de una
+ * transacción que luego se revierte, el evento no se emite.
  */
-class ViajeCambioEstado
+class ViajeCambioEstado implements DifusionEnTiempoReal
 {
-    use Dispatchable;
+    use Dispatchable, InteractsWithSockets;
+
+    public int $tries = 3;
 
     public function __construct(
         public readonly int $viajeId,
         public readonly EstadoViaje $estadoNuevo,
-    ) {
+        public readonly ?int $conductorId = null,
+    ) {}
+
+    /**
+     * @return array<int, Channel>
+     */
+    public function broadcastOn(): array
+    {
+        return [new PrivateChannel("viaje.{$this->viajeId}")];
+    }
+
+    public function broadcastAs(): string
+    {
+        return 'viaje.estado';
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function broadcastWith(): array
+    {
+        return [
+            'viaje_id' => $this->viajeId,
+            'estado' => $this->estadoNuevo->value,
+            'conductor_id' => $this->conductorId,
+        ];
     }
 }

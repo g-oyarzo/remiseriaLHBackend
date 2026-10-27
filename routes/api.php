@@ -70,7 +70,9 @@ Route::middleware(['auth:sanctum', 'role:conductor'])->prefix('conductor')->grou
     Route::patch('/ubicacion', [UbicacionController::class, 'update'])->middleware('throttle:ubicacion');
 
     Route::get('/viajes/pendientes', [ViajeController::class, 'pendientes']);
-    Route::patch('/viajes/{viaje}/aceptar', [ViajeController::class, 'aceptar']);
+    // POST es el contrato de Hacer.txt; PATCH se conserva por compatibilidad.
+    Route::match(['post', 'patch'], '/viajes/{viaje}/aceptar', [ViajeController::class, 'aceptar']);
+    Route::match(['post', 'patch'], '/viajes/{viaje}/rechazar', [ViajeController::class, 'rechazar']);
     Route::patch('/viajes/{viaje}/iniciar', [ViajeController::class, 'iniciar']);
     Route::patch('/viajes/{viaje}/finalizar', [ViajeController::class, 'finalizar']);
 });
@@ -105,6 +107,7 @@ Route::middleware(['auth:sanctum', 'role:administrador'])->prefix('admin')->grou
     Route::apiResource('/vehiculos', VehiculoController::class);
 
     Route::post('/viajes/registrar', [SolicitudViajeController::class, 'registrarTelefonico']);
+    Route::post('/viajes/{viaje}/reasignar', [ViajeController::class, 'reasignar']);
     
     Route::get('/tarifas', [TarifaController::class, 'index']);
     Route::put('/tarifas', [TarifaController::class, 'actualizar']);

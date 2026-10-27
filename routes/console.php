@@ -29,3 +29,11 @@ Schedule::command('viajes:despachar-programados')
     ->everyMinute()
     ->withoutOverlapping()
     ->onOneServer();
+
+// Red de seguridad de la asignación automática (CU 03): vence ofertas sin
+// respuesta cuyo job se haya perdido y reactiva búsquedas detenidas. Ver
+// App\Console\Commands\SupervisarDespachoCommand.
+Schedule::command('viajes:supervisar-despacho')
+    ->everyMinute()
+    ->withoutOverlapping()
+    ->onOneServer();

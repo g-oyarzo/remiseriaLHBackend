@@ -2,6 +2,7 @@
 
 namespace App\Providers;
 
+use App\Events\Contracts\DifusionEnTiempoReal;
 use App\Services\Mapas\GoogleRoutesProveedorDistancia;
 use App\Services\Mapas\OsrmProveedorDistancia;
 use App\Services\Mapas\ProveedorDistancia;
@@ -9,6 +10,7 @@ use App\Services\Mapas\SinProveedorDistancia;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
 
@@ -54,6 +56,10 @@ class AppServiceProvider extends ServiceProvider
     public function boot(): void
     {
         $this->configurarLimitesDeFrecuencia();
+
+        if (filled($conexion = config('remiseria.difusion.conexion_cola'))) {
+            Queue::route(DifusionEnTiempoReal::class, connection: $conexion);
+        }
     }
 
     /**

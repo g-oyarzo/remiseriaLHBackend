@@ -28,14 +28,19 @@ class ViajePolicy
      * ¿Puede $cuenta ver/actuar sobre $viaje?
      *
      * Administrador: siempre. Cliente: solo si es el dueño del viaje.
-     * Conductor: solo si es el conductor asignado.
+     * Conductor: si es el conductor asignado, o si tiene una oferta
+     * pendiente de ese viaje (para ver el detalle antes de aceptar).
      */
     public function ver(Cuenta $cuenta, Viaje $viaje): Response
     {
         $autorizado = match ($cuenta->rol) {
             RolPersona::Administrador => true,
             RolPersona::Cliente => $viaje->cliente_id === $cuenta->persona_id,
-            RolPersona::Conductor => $viaje->conductor_id === $cuenta->persona_id,
+            RolPersona::Conductor => $viaje->conductor_id === $cuenta->persona_id
+                || ($viaje->conductor_id === null && $viaje->asignaciones()
+                    ->pendientes()
+                    ->where('conductor_id', $cuenta->persona_id)
+                    ->exists()),
         };
 
         return $autorizado

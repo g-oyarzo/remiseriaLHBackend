@@ -48,6 +48,46 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Asignación automática de conductores (CU 03)
+    |--------------------------------------------------------------------------
+    |
+    | - tiempo_aceptacion_segundos: vencimiento de cada oferta.
+    | - radio_busqueda_metros: solo se consideran conductores a esa distancia
+    |   (en línea recta) del origen; es el criterio de "zona geográfica".
+    | - ubicacion_vigencia_segundos: un conductor cuyo último ping GPS es más
+    |   viejo que esto no se considera (no se supone que siga cerca).
+    | - max_ofertas: tope de conductores a los que se ofrece un mismo viaje.
+    | - reintento_sin_candidatos_segundos / max_reintentos_sin_candidatos:
+    |   si no hay candidatos se reintenta periódicamente; al agotarse, el
+    |   viaje queda solicitado y se avisa al administrador.
+    | - pesos: el puntaje es menor cuanto mejor es el candidato:
+    |     distancia_km * distancia_km
+    |   - calificacion * calificacion (1 a 5; sin historial = calificacion_sin_historial)
+    |   - min(antigüedad en años, 10) * antiguedad_anio
+    |   + viajes finalizados hoy * viaje_del_dia
+    |   Son valores iniciales configurables, no reglas tomadas de la
+    |   documentación del negocio.
+    |
+    */
+
+    'asignacion' => [
+        'tiempo_aceptacion_segundos' => (int) env('ASIGNACION_TIEMPO_ACEPTACION_SEGUNDOS', 30),
+        'radio_busqueda_metros' => (int) env('ASIGNACION_RADIO_BUSQUEDA_METROS', 10000),
+        'ubicacion_vigencia_segundos' => (int) env('ASIGNACION_UBICACION_VIGENCIA_SEGUNDOS', 120),
+        'max_ofertas' => (int) env('ASIGNACION_MAX_OFERTAS', 10),
+        'reintento_sin_candidatos_segundos' => (int) env('ASIGNACION_REINTENTO_SEGUNDOS', 30),
+        'max_reintentos_sin_candidatos' => (int) env('ASIGNACION_MAX_REINTENTOS', 20),
+        'calificacion_sin_historial' => (float) env('ASIGNACION_CALIFICACION_SIN_HISTORIAL', 4.0),
+        'pesos' => [
+            'distancia_km' => (float) env('ASIGNACION_PESO_DISTANCIA_KM', 1.0),
+            'calificacion' => (float) env('ASIGNACION_PESO_CALIFICACION', 0.5),
+            'antiguedad_anio' => (float) env('ASIGNACION_PESO_ANTIGUEDAD_ANIO', 0.1),
+            'viaje_del_dia' => (float) env('ASIGNACION_PESO_VIAJE_DEL_DIA', 0.2),
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Reservas (CU 09)
     |--------------------------------------------------------------------------
     |
@@ -78,6 +118,21 @@ return [
     'cotizacion' => [
         'distancia_minima_metros' => (float) env('COTIZACION_DISTANCIA_MINIMA_METROS', 50),
         'distancia_maxima_km' => (float) env('COTIZACION_DISTANCIA_MAXIMA_KM', 300),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Difusión en tiempo real
+    |--------------------------------------------------------------------------
+    |
+    | Conexión de cola para los eventos App\Events\Contracts\DifusionEnTiempoReal
+    | (estado del viaje, ofertas a conductores, chat). Vacío = conexión por
+    | defecto (QUEUE_CONNECTION). En tests se usa "descartar".
+    |
+    */
+
+    'difusion' => [
+        'conexion_cola' => env('DIFUSION_CONEXION_COLA'),
     ],
 
     /*

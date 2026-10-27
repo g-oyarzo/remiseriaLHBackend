@@ -35,6 +35,13 @@ return [
             'driver' => 'sync',
         ],
 
+        // Descarta los trabajos. Se usa en tests para las difusiones en
+        // tiempo real (DIFUSION_CONEXION_COLA=descartar), que de otro modo
+        // intentarían conectarse a un servidor Reverb.
+        'descartar' => [
+            'driver' => 'null',
+        ],
+
         'database' => [
             'driver' => 'database',
             'connection' => env('DB_QUEUE_CONNECTION'),

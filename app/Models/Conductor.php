@@ -40,6 +40,7 @@ class Conductor extends Model
         'estado',
         'en_servicio',
         'ubicacion_actual',
+        'ubicacion_actualizada_en',
         'vehiculo_id',
     ];
 
@@ -62,6 +63,7 @@ class Conductor extends Model
             'estado' => EstadoConductor::class,
             'en_servicio' => 'boolean',
             'ubicacion_actual' => PointCast::class,
+            'ubicacion_actualizada_en' => 'datetime',
         ];
     }
 
@@ -78,6 +80,11 @@ class Conductor extends Model
     public function viajes(): HasMany
     {
         return $this->hasMany(Viaje::class, 'conductor_id');
+    }
+
+    public function asignaciones(): HasMany
+    {
+        return $this->hasMany(AsignacionViaje::class, 'conductor_id');
     }
 
     /**

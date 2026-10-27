@@ -71,3 +71,9 @@ Broadcast::channel('conductor.{conductorId}', function (Cuenta $cuenta, int $con
         ->whereIn('estado', [EstadoViaje::Aceptado, EstadoViaje::EnCurso])
         ->exists();
 });
+
+/**
+ * Canal del panel de despacho: alertas operativas (búsquedas de conductor
+ * agotadas) y posiciones de la flota. Solo administradores.
+ */
+Broadcast::channel('admin.despacho', fn (Cuenta $cuenta): bool => $cuenta->rol === RolPersona::Administrador);
