@@ -8,6 +8,7 @@ use App\Enums\EstadoViaje;
 use App\Enums\RolPersona;
 use App\Enums\TipoViaje;
 use App\Http\Controllers\Controller;
+use App\Http\Resources\ViajeResource;
 use App\Models\Conductor;
 use App\Models\Pago;
 use App\Models\Tarifa;
@@ -92,7 +93,7 @@ class ViajeController extends Controller
             perPage: (int) $request->input('per_page', 15),
         );
 
-        return response()->json($viajes);
+        return response()->json(ViajeResource::paginado($viajes, $request));
     }
 
     /**
@@ -135,7 +136,7 @@ class ViajeController extends Controller
             'mensajes' => fn ($query) => $query->latest()->limit(30),
         ]);
 
-        return response()->json(['data' => $viaje]);
+        return response()->json(['data' => ViajeResource::arreglo($viaje, $request)]);
     }
 
     /**
@@ -229,7 +230,7 @@ class ViajeController extends Controller
 
         return response()->json([
             'message' => 'Viaje solicitado exitosamente.',
-            'data' => $viaje,
+            'data' => ViajeResource::arreglo($viaje, $request),
         ], Response::HTTP_CREATED);
     }
 
@@ -316,7 +317,7 @@ class ViajeController extends Controller
 
         return response()->json([
             'message' => 'Viaje aceptado.',
-            'data' => $viaje,
+            'data' => ViajeResource::arreglo($viaje, $request),
         ]);
     }
 
@@ -377,7 +378,7 @@ class ViajeController extends Controller
 
         return response()->json([
             'message' => 'Viaje iniciado.',
-            'data' => $viaje,
+            'data' => ViajeResource::arreglo($viaje, $request),
         ]);
     }
 
@@ -423,7 +424,7 @@ class ViajeController extends Controller
 
         return response()->json([
             'message' => 'Viaje finalizado.',
-            'data' => $viaje,
+            'data' => ViajeResource::arreglo($viaje, $request),
         ]);
     }
 
@@ -477,7 +478,7 @@ class ViajeController extends Controller
 
         return response()->json([
             'message' => 'Viaje cancelado.',
-            'data' => $viaje,
+            'data' => ViajeResource::arreglo($viaje, $request),
         ]);
     }
 
@@ -565,7 +566,7 @@ class ViajeController extends Controller
 
         return response()->json([
             'message' => 'Viaje calificado.',
-            'data' => $viaje,
+            'data' => ViajeResource::arreglo($viaje, $request),
         ]);
     }
 
@@ -604,6 +605,6 @@ class ViajeController extends Controller
             ->orderBy('fecha_viaje')
             ->paginate(15);
 
-        return response()->json($viajes);
+        return response()->json(ViajeResource::paginado($viajes, $request));
     }
 }
