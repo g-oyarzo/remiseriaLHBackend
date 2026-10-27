@@ -28,7 +28,7 @@ class TarifaController extends Controller
         description: 'Todas las tarifas creadas, vigentes y no vigentes, ordenadas por fecha de creación descendente.',
         tags: ['Tarifas'],
         security: [['bearerAuth' => []]],
-        parameters: [new OA\Parameter(name: 'per_page', in: 'query', required: false, schema: new OA\Schema(type: 'integer', default: 15))],
+        parameters: [new OA\Parameter(name: 'per_page', in: 'query', required: false, description: 'Entre 1 y 100.', schema: new OA\Schema(type: 'integer', default: 15, minimum: 1, maximum: 100))],
         responses: [
             new OA\Response(
                 response: 200,
@@ -49,7 +49,7 @@ class TarifaController extends Controller
     {
         $tarifas = Tarifa::query()
             ->orderByDesc('created_at')
-            ->paginate((int) $request->input('per_page', 15));
+            ->paginate($this->porPagina($request));
 
         return response()->json($tarifas);
     }

@@ -43,7 +43,7 @@ Route::middleware('auth:sanctum')->group(function () {
     
     // Mensajes
     Route::get('/viajes/{viaje}/mensajes', [MensajeController::class, 'index']);
-    Route::post('/viajes/{viaje}/mensajes', [MensajeController::class, 'store']);
+    Route::post('/viajes/{viaje}/mensajes', [MensajeController::class, 'store'])->middleware('throttle:chat');
     Route::patch('/viajes/{viaje}/mensajes/marcar-leidos', [MensajeController::class, 'marcarLeidos']);
 });
 
@@ -56,7 +56,7 @@ Route::middleware(['auth:sanctum', 'role:cliente'])->prefix('cliente')->group(fu
 // Rutas Conductor
 Route::middleware(['auth:sanctum', 'role:conductor'])->prefix('conductor')->group(function () {
     Route::patch('/estado-servicio', [ConductorController::class, 'toggleServicio']);
-    Route::patch('/ubicacion', [UbicacionController::class, 'update']);
+    Route::patch('/ubicacion', [UbicacionController::class, 'update'])->middleware('throttle:ubicacion');
 
     Route::get('/viajes/pendientes', [ViajeController::class, 'pendientes']);
     Route::patch('/viajes/{viaje}/aceptar', [ViajeController::class, 'aceptar']);
@@ -70,7 +70,7 @@ Route::middleware(['auth:sanctum', 'role:conductor'])->prefix('conductor')->grou
 // grupo role:conductor exclusivo de arriba, así que un admin nunca podía
 // alcanzarla: el middleware lo bloqueaba con 403 antes de llegar al
 // controlador, sin importar lo que dijera su lógica interna.
-Route::middleware(['auth:sanctum', 'role:conductor,administrador'])
+Route::middleware(['auth:sanctum', 'role:conductor,administrador', 'throttle:pagos'])
     ->post('/conductor/viajes/{viaje}/pago', [PagoController::class, 'store']);
 
 // Rutas Administrador
