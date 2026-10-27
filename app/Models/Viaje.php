@@ -73,6 +73,12 @@ class Viaje extends Model
         'iniciado_en',
         'distancia_recorrida_metros',
         'puntos_seguimiento',
+        'finalizado_en',
+        'distancia_final_km',
+        'duracion_final_min',
+        'costo_final',
+        'costo_final_origen',
+        'distancia_al_destino_metros',
     ];
 
     /**
@@ -99,6 +105,11 @@ class Viaje extends Model
             'iniciado_en' => 'datetime',
             'distancia_recorrida_metros' => 'integer',
             'puntos_seguimiento' => 'integer',
+            'finalizado_en' => 'datetime',
+            'distancia_final_km' => 'float',
+            'duracion_final_min' => 'integer',
+            'costo_final' => 'decimal:2',
+            'distancia_al_destino_metros' => 'integer',
         ];
     }
 

@@ -74,7 +74,7 @@ Route::middleware(['auth:sanctum', 'role:conductor'])->prefix('conductor')->grou
     Route::match(['post', 'patch'], '/viajes/{viaje}/aceptar', [ViajeController::class, 'aceptar']);
     Route::match(['post', 'patch'], '/viajes/{viaje}/rechazar', [ViajeController::class, 'rechazar']);
     Route::patch('/viajes/{viaje}/iniciar', [ViajeController::class, 'iniciar']);
-    Route::patch('/viajes/{viaje}/finalizar', [ViajeController::class, 'finalizar']);
+    Route::match(['post', 'patch'], '/viajes/{viaje}/finalizar', [ViajeController::class, 'finalizar']);
 });
 
 // Corrección: PagoController::store() está escrito para permitir tanto al
