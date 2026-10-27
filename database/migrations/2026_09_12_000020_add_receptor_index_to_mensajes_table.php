@@ -30,6 +30,11 @@ return new class extends Migration
     public function down(): void
     {
         Schema::table('mensajes', function (Blueprint $table) {
+            // MySQL usa este índice compuesto para la clave foránea de
+            // receptor_persona_id (descartó el índice propio de la FK al
+            // crearlo), así que no se puede eliminar sin antes recrear un
+            // índice simple sobre la columna (error 1553).
+            $table->index('receptor_persona_id');
             $table->dropIndex(['receptor_persona_id', 'leido']);
         });
     }
