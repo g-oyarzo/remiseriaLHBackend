@@ -501,6 +501,18 @@ class ConductorController extends Controller
                 'vehiculo_id' => null,
             ]);
 
+            // Una baja debe cortar el acceso de inmediato: sin esto el
+            // conductor seguía operando con su token vigente (pings GPS,
+            // listado de viajes) hasta que expirara. Solo se revocan cuentas
+            // con rol conductor, para no cerrar la sesión de un administrador
+            // que además tenga legajo de conductor.
+            Cuenta::query()
+                ->where('persona_id', $bloqueado->persona_id)
+                ->where('rol', RolPersona::Conductor)
+                ->first()
+                ?->tokens()
+                ->delete();
+
             $conductor->setRawAttributes($bloqueado->getAttributes(), true);
         });
     }
