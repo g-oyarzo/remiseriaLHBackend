@@ -1,55 +1,93 @@
 # Remisería LH — Backend
 
-API REST en Laravel para el sistema de gestión de Remisería LH.
+API REST en Laravel para el sistema de gestión de Remisería LH: solicitudes y reservas de viajes, cotización, asignación automática de conductores, seguimiento GPS en tiempo real, chat, pagos, comprobantes y reportes.
 
 ## Stack
-Laravel 13 (PHP 8.3) + MySQL + Laravel Sanctum (autenticación).
 
-## Instalación y Ejecución Local
+- Laravel 13 (PHP ≥ 8.3; la imagen de Sail usa PHP 8.5) con Sanctum (tokens Bearer).
+- MySQL 8.4 (obligatorio: se usan columnas `POINT` SRID 4326 y `ST_Distance_Sphere`).
+- Redis (último ping GPS de cada conductor; opcional para colas y cache).
+- Laravel Reverb (WebSockets) y colas de Laravel (worker + scheduler).
+- Documentación OpenAPI con l5-swagger (`/api/documentation`).
 
-Para garantizar la compatibilidad total con las funciones geoespaciales (SRID 4326 y `ST_GeomFromText`) usadas en la base de datos, se recomienda fuertemente el uso de **Laravel Sail** (Docker).
+## Documentación
 
-### Prerrequisitos
-- Docker Desktop o Docker Engine instalado.
-- PHP 8.3 (solo si deseas instalar las dependencias fuera del contenedor).
+| Documento | Contenido |
+|---|---|
+| [docs/api.md](docs/api.md) | Endpoints, roles, formatos de error y contratos. |
+| [docs/arquitectura-y-flujos.md](docs/arquitectura-y-flujos.md) | Estados del viaje y del pago, asignación, cotización, geolocalización, tiempo real, migración legacy. |
+| [docs/seguridad-y-despliegue.md](docs/seguridad-y-despliegue.md) | Controles de seguridad, límites de confianza y checklist de producción. |
+| [docs/cambios-para-frontend.md](docs/cambios-para-frontend.md) | Cambios de contrato que deben adoptar las apps y el panel. |
+| [docs/estado-backend.md](docs/estado-backend.md) | Estado de las tareas planificadas y hallazgos de la auditoría. |
+| [docs/tests.md](docs/tests.md) | Cómo correr la suite y medir cobertura. |
 
-### Pasos
-1. Clona el repositorio e instala las dependencias (si no tienes PHP localmente, usa un contenedor temporal, o instala via Composer):
+## Instalación local con Docker (recomendado)
+
 ```bash
-composer install
-```
-
-2. Configura las variables de entorno:
-```bash
+composer install                  # o con un contenedor de PHP si no lo tenés local
 cp .env.example .env
 php artisan key:generate
-```
-
-3. Levanta los contenedores (MySQL y la aplicación):
-```bash
-./vendor/bin/sail up -d
-```
-*(En Windows puedes ejecutar `docker compose up -d` si no utilizas WSL).*
-
-4. Ejecuta las migraciones:
-```bash
+./vendor/bin/sail up -d           # en Windows sin WSL: docker compose up -d
 ./vendor/bin/sail artisan migrate
+./vendor/bin/sail artisan db:seed # marcas, tarifa inicial, administrador y datos demo
 ```
 
-5. (Opcional) Simula un año de operación con carga de datos masiva:
-```bash
-./vendor/bin/sail artisan simular:anual
-```
+`compose.yaml` levanta la aplicación, MySQL, Redis, un **worker de colas** (`queue:work`) y el **scheduler** (`schedule:work`). Sin el worker no se asignan conductores ni se difunden eventos; sin el scheduler no se despachan reservas ni se vencen ofertas perdidas.
 
-### Ejecutar Tests
-El proyecto requiere **MySQL** para las pruebas debido al soporte de **Índices Espaciales (Spatial Indexes)**. Se ha configurado el `phpunit.xml` para utilizar la conexión del contenedor local.
+El servidor de WebSockets se inicia con:
 
 ```bash
-./vendor/bin/sail test
+./vendor/bin/sail artisan reverb:start --host=0.0.0.0 --port=8080
 ```
-O de forma nativa si tu MySQL local expone el puerto 3306:
+
+### Instalación nativa (XAMPP, Laragon, Herd)
+
+Configurar en `.env` `DB_HOST=127.0.0.1` y `REDIS_HOST=127.0.0.1`, y correr en terminales separadas:
+
 ```bash
-php artisan test
+php artisan serve
+php artisan queue:work --tries=3 --backoff=5
+php artisan schedule:work
+php artisan reverb:start
+```
+
+Si Redis no está disponible, la API sigue funcionando: el último ping GPS se guarda directamente en MySQL (ver `UBICACION_CACHE_STORE`).
+
+## Variables de entorno
+
+`.env.example` documenta todas las variables con sus valores por defecto. Las que hay que revisar sí o sí:
+
+| Variable | Para qué |
+|---|---|
+| `APP_KEY`, `APP_DEBUG=false`, `APP_URL` | Base de Laravel. Nunca `APP_DEBUG=true` en producción. |
+| `DB_*` | MySQL 8. |
+| `REDIS_*`, `UBICACION_CACHE_STORE=redis` | Último ping GPS. |
+| `QUEUE_CONNECTION` | `database` o `redis`; nunca `sync` en producción. |
+| `REVERB_APP_ID/KEY/SECRET`, `REVERB_ALLOWED_ORIGINS` | WebSockets. Credenciales propias y orígenes reales en producción. |
+| `MAPAS_DRIVER`, `MAPAS_OSRM_URL` o `GOOGLE_MAPS_API_KEY` | Servicio de ruteo del cotizador. Con `ninguno` se usa la contingencia por zonas. |
+| `ADMIN_PASSWORD` | Contraseña del administrador inicial (AdminSeeder). |
+| `CORS_ALLOWED_ORIGINS`, `SANCTUM_STATEFUL_DOMAINS` | Dominios del panel web. |
+| `SANCTUM_TOKEN_EXPIRATION` | Vida de los tokens (minutos). |
+
+Las reglas operativas (tiempos de aceptación, radios, geocerca de 100 m, anticipación de reservas, límites de frecuencia, etc.) están en `config/remiseria.php` y se pueden ajustar por entorno.
+
+## Comandos Artisan propios
+
+| Comando | Uso |
+|---|---|
+| `viajes:despachar-programados` | Pasa a despacho las reservas que entraron en la ventana previa (scheduler, cada minuto). |
+| `viajes:supervisar-despacho` | Vence ofertas sin respuesta y reactiva búsquedas detenidas (scheduler, cada minuto). |
+| `legacy:importar {archivo} --tipo=clientes\|conductores [--dry-run]` | Migración de datos del sistema anterior desde CSV. Ver [docs/arquitectura-y-flujos.md](docs/arquitectura-y-flujos.md#migración-de-datos-legacy). |
+| `simular:anual {dias} {viajes_por_dia}` | Genera datos de volumen para pruebas de carga (solo entornos de prueba). |
+| `broadcast:test` | Evento de humo para verificar Reverb. |
+
+## Tests
+
+La suite requiere MySQL (funciones espaciales). Detalle en [docs/tests.md](docs/tests.md).
+
+```bash
+./vendor/bin/sail test            # dentro de Docker
+vendor/bin/phpunit                # nativo, con DB_HOST/DB_PORT apuntando a un MySQL de pruebas
 ```
 
 ---
