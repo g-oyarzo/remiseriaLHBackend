@@ -70,6 +70,9 @@ class Viaje extends Model
         'fecha_viaje',
         'despachado_en',
         'busqueda_agotada_en',
+        'iniciado_en',
+        'distancia_recorrida_metros',
+        'puntos_seguimiento',
     ];
 
     /**
@@ -93,6 +96,9 @@ class Viaje extends Model
             'fecha_viaje' => 'datetime',
             'despachado_en' => 'datetime',
             'busqueda_agotada_en' => 'datetime',
+            'iniciado_en' => 'datetime',
+            'distancia_recorrida_metros' => 'integer',
+            'puntos_seguimiento' => 'integer',
         ];
     }
 

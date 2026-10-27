@@ -67,7 +67,7 @@ Route::middleware(['auth:sanctum', 'role:cliente'])->prefix('cliente')->group(fu
 // Rutas Conductor
 Route::middleware(['auth:sanctum', 'role:conductor'])->prefix('conductor')->group(function () {
     Route::patch('/estado-servicio', [ConductorController::class, 'toggleServicio']);
-    Route::patch('/ubicacion', [UbicacionController::class, 'update'])->middleware('throttle:ubicacion');
+    Route::match(['post', 'patch'], '/ubicacion', [UbicacionController::class, 'update'])->middleware('throttle:ubicacion');
 
     Route::get('/viajes/pendientes', [ViajeController::class, 'pendientes']);
     // POST es el contrato de Hacer.txt; PATCH se conserva por compatibilidad.
