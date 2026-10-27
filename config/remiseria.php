@@ -177,6 +177,21 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Reportes administrativos (CU 15 / CU 16)
+    |--------------------------------------------------------------------------
+    |
+    | Cotas para que un reporte no se convierta en una consulta o un archivo
+    | desproporcionado: rango máximo de fechas y filas máximas exportables.
+    |
+    */
+
+    'reportes' => [
+        'rango_maximo_dias' => (int) env('REPORTES_RANGO_MAXIMO_DIAS', 366),
+        'max_filas_exportacion' => (int) env('REPORTES_MAX_FILAS_EXPORTACION', 5000),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Difusión en tiempo real
     |--------------------------------------------------------------------------
     |
