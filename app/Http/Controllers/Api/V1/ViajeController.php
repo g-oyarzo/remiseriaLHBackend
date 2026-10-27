@@ -14,16 +14,22 @@ use App\Http\Requests\SolicitarViajeRequest;
 use App\Http\Resources\ViajeResource;
 use App\Models\Conductor;
 use App\Models\Viaje;
-use App\OpenApi\Schemas\SimpleMessageResponse;
-use App\Services\Asignacion\AsignadorConductores;
-use App\Services\Asignacion\RespuestaAsignacionInvalida;
 use App\OpenApi\Schemas\CalificarViajeRequest as CalificarViajeRequestSchema;
 use App\OpenApi\Schemas\CrearViajeRequest as CrearViajeRequestSchema;
 use App\OpenApi\Schemas\ErrorResponse;
 use App\OpenApi\Schemas\PaginationMeta;
 use App\OpenApi\Schemas\ServerErrorResponse;
+use App\OpenApi\Schemas\SimpleMessageResponse;
+use App\OpenApi\Schemas\UpdateUbicacionRequest as UpdateUbicacionRequestSchema;
 use App\OpenApi\Schemas\ValidationErrorResponse;
 use App\OpenApi\Schemas\ViajeSchema;
+use App\Services\Asignacion\AsignadorConductores;
+use App\Services\Asignacion\RespuestaAsignacionInvalida;
+use App\Services\Geolocalizacion\RegistroDeUbicaciones;
+use App\Services\Geolocalizacion\UbicacionInconsistente;
+use App\Services\Viajes\FinalizacionDeViajes;
+use App\Services\Viajes\FinalizacionNoPermitida;
+use App\ValueObjects\Coordinate;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -371,44 +377,66 @@ class ViajeController extends Controller
     }
 
     /**
-     * PATCH /api/v1/viajes/{viaje}/finalizar
-     *
-     * El conductor finaliza el viaje.
+     * POST|PATCH /api/v1/conductor/viajes/{viaje}/finalizar (CU 06)
      */
-    #[OA\Patch(
+    #[OA\Post(
         path: '/conductor/viajes/{viaje}/finalizar',
         summary: 'Finalizar un viaje en curso',
+        description: 'Solo el conductor asignado. Valida con ST_Distance_Sphere que la última posición registrada del conductor esté a no más de FINALIZACION_RADIO_TOLERANCIA_METROS (100 m) del destino; si se envían lat/lng se registran antes como un ping GPS. Calcula distancia y duración finales y el costo_final con la tarifa guardada en el viaje (no la vigente). También se acepta PATCH por compatibilidad.',
         tags: ['Viajes'],
         security: [['bearerAuth' => []]],
         parameters: [new OA\Parameter(name: 'viaje', in: 'path', required: true, schema: new OA\Schema(type: 'integer'))],
+        requestBody: new OA\RequestBody(required: false, content: new OA\JsonContent(ref: UpdateUbicacionRequestSchema::class)),
         responses: [
             new OA\Response(response: 200, description: 'Viaje finalizado.', content: new OA\JsonContent(properties: [
                 new OA\Property(property: 'message', type: 'string', example: 'Viaje finalizado.'),
                 new OA\Property(property: 'data', ref: ViajeSchema::class),
             ])),
-            new OA\Response(response: 403, description: 'No tiene acceso a este viaje, o no es el conductor asignado ni administrador.', content: new OA\JsonContent(ref: ErrorResponse::class)),
+            new OA\Response(response: 403, description: 'La cuenta no es el conductor asignado.', content: new OA\JsonContent(ref: ErrorResponse::class)),
             new OA\Response(response: 404, description: 'Viaje inexistente.', content: new OA\JsonContent(ref: ErrorResponse::class)),
-            new OA\Response(response: 409, description: 'El viaje no está "en curso".', content: new OA\JsonContent(ref: ErrorResponse::class)),
+            new OA\Response(response: 409, description: 'El viaje no está "en curso", o no hay una ubicación reciente del conductor.', content: new OA\JsonContent(ref: ErrorResponse::class)),
+            new OA\Response(response: 422, description: 'El conductor está fuera del radio del destino (incluye distancia_al_destino_metros) o la ubicación enviada es inválida.', content: new OA\JsonContent(ref: ValidationErrorResponse::class)),
         ],
     )]
-    public function finalizar(Request $request, Viaje $viaje): JsonResponse
+    public function finalizar(Request $request, Viaje $viaje, FinalizacionDeViajes $finalizacion, RegistroDeUbicaciones $ubicaciones): JsonResponse
     {
-        $this->authorize('ver', $viaje);
+        $cuenta = $request->user();
 
-        if ($viaje->estado !== EstadoViaje::EnCurso) {
+        // El grupo de rutas ya exige rol conductor; se re-verifica (defensa
+        // en profundidad) y solo el conductor asignado puede finalizar.
+        if ($cuenta->rol !== RolPersona::Conductor || $viaje->conductor_id !== $cuenta->persona_id) {
             return response()->json([
-                'message' => 'El viaje debe estar "en curso" para finalizarlo.',
-            ], Response::HTTP_CONFLICT);
-        }
-
-        if ($viaje->conductor_id !== $request->user()->persona_id
-            && $request->user()->rol !== RolPersona::Administrador) {
-            return response()->json([
-                'message' => 'Solo el conductor asignado o un administrador puede finalizar el viaje.',
+                'message' => 'Solo el conductor asignado puede finalizar el viaje.',
             ], Response::HTTP_FORBIDDEN);
         }
 
-        $viaje->update(['estado' => EstadoViaje::Finalizado]);
+        $validated = $request->validate([
+            'lat' => ['nullable', 'numeric', 'between:-90,90', 'required_with:lng'],
+            'lng' => ['nullable', 'numeric', 'between:-180,180', 'required_with:lat'],
+            'precision_metros' => ['nullable', 'numeric', 'min:0', 'max:10000'],
+        ]);
+
+        $conductor = Conductor::query()->findOrFail($cuenta->persona_id);
+
+        try {
+            if (isset($validated['lat'], $validated['lng'])) {
+                $ubicaciones->registrar(
+                    $conductor,
+                    new Coordinate(lat: (float) $validated['lat'], lng: (float) $validated['lng']),
+                    isset($validated['precision_metros']) ? (float) $validated['precision_metros'] : null,
+                );
+                $conductor->refresh();
+            }
+
+            $viaje = $finalizacion->finalizar($viaje, $conductor);
+        } catch (UbicacionInconsistente $e) {
+            return response()->json([
+                'message' => $e->getMessage(),
+                'errors' => ['lat' => [$e->getMessage()]],
+            ], Response::HTTP_UNPROCESSABLE_ENTITY);
+        } catch (FinalizacionNoPermitida $e) {
+            return response()->json(['message' => $e->getMessage()] + $e->datos, $e->status);
+        }
 
         return response()->json([
             'message' => 'Viaje finalizado.',

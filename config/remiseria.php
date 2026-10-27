@@ -82,6 +82,27 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Finalización de viajes (CU 06)
+    |--------------------------------------------------------------------------
+    |
+    | - radio_tolerancia_metros: distancia máxima (ST_Distance_Sphere) entre
+    |   la última posición del conductor y el destino para poder finalizar.
+    | - ubicacion_vigencia_segundos: la última posición debe ser al menos así
+    |   de reciente; si no, el conductor debe informar su posición actual.
+    | - minimo_puntos_seguimiento: con menos tramos GPS registrados durante el
+    |   viaje se considera que el recorrido no es confiable y se cobra el
+    |   monto cotizado.
+    |
+    */
+
+    'finalizacion' => [
+        'radio_tolerancia_metros' => (float) env('FINALIZACION_RADIO_TOLERANCIA_METROS', 100),
+        'ubicacion_vigencia_segundos' => (int) env('FINALIZACION_UBICACION_VIGENCIA_SEGUNDOS', 60),
+        'minimo_puntos_seguimiento' => (int) env('FINALIZACION_MINIMO_PUNTOS_SEGUIMIENTO', 3),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Asignación automática de conductores (CU 03)
     |--------------------------------------------------------------------------
     |

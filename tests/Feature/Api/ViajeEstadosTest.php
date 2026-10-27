@@ -88,7 +88,8 @@ class ViajeEstadosTest extends TestCase
     {
         [$viaje, , $conductorCuenta] = $this->crearViajeAsignado(['estado' => EstadoViaje::EnCurso]);
 
-        $response = $this->actingAs($conductorCuenta)->patchJson("/api/v1/conductor/viajes/{$viaje->id}/finalizar");
+        // Desde CU 06 completo, finalizar exige estar en el destino (100 m).
+        $response = $this->actingAs($conductorCuenta)->patchJson("/api/v1/conductor/viajes/{$viaje->id}/finalizar", $viaje->destino->toArray());
 
         $response->assertStatus(200);
         $this->assertSame(EstadoViaje::Finalizado, $viaje->fresh()->estado);
