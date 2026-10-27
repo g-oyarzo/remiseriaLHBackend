@@ -7,6 +7,7 @@ namespace Database\Factories;
 use App\Enums\EstadoConductor;
 use App\Models\Conductor;
 use App\Models\Persona;
+use App\Models\Vehiculo;
 use App\ValueObjects\Coordinate;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
@@ -43,6 +44,21 @@ class ConductorFactory extends Factory
     public function enServicio(): static
     {
         return $this->state(fn (array $attributes): array => ['en_servicio' => true]);
+    }
+
+    /**
+     * Conductor elegible para la asignación automática: en servicio, con
+     * vehículo y con un ping GPS reciente en la coordenada dada.
+     */
+    public function disponibleEn(Coordinate $ubicacion): static
+    {
+        return $this->state(fn (array $attributes): array => [
+            'en_servicio' => true,
+            'estado' => EstadoConductor::Activo,
+            'vehiculo_id' => Vehiculo::factory(),
+            'ubicacion_actual' => $ubicacion,
+            'ubicacion_actualizada_en' => now(),
+        ]);
     }
 
     public function eliminado(): static

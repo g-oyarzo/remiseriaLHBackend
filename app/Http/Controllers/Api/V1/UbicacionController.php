@@ -69,7 +69,7 @@ class UbicacionController extends Controller
             lng: (float) $validated['lng']
         );
 
-        $conductor->update(['ubicacion_actual' => $ubicacion]);
+        $conductor->update(['ubicacion_actual' => $ubicacion, 'ubicacion_actualizada_en' => now()]);
 
         $viajeActivoId = Viaje::query()
             ->where('conductor_id', $conductor->persona_id)

@@ -6,6 +6,7 @@ namespace Tests\Feature\Api;
 
 use App\Enums\EstadoViaje;
 use App\Enums\RolPersona;
+use App\Models\AsignacionViaje;
 use App\Models\Cliente;
 use App\Models\Conductor;
 use App\Models\Cuenta;
@@ -41,7 +42,7 @@ class ViajeTest extends TestCase
         ]);
     }
 
-    public function test_conductor_puede_aceptar_viaje(): void
+    public function test_conductor_con_la_oferta_puede_aceptar_viaje(): void
     {
         $tarifa = Tarifa::factory()->create(['activa' => true]);
         $viaje = Viaje::factory()->create([
@@ -58,6 +59,13 @@ class ViajeTest extends TestCase
             'en_servicio' => true,
             'vehiculo_id' => $vehiculo->id,
             'estado' => 'activo'
+        ]);
+
+        // Con la asignación automática (CU 03) solo puede aceptar el
+        // conductor al que se le ofreció el viaje.
+        AsignacionViaje::factory()->create([
+            'viaje_id' => $viaje->id,
+            'conductor_id' => $conductorCuenta->persona_id,
         ]);
 
         $response = $this->actingAs($conductorCuenta)->patchJson("/api/v1/conductor/viajes/{$viaje->id}/aceptar");

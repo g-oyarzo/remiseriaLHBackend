@@ -4,12 +4,11 @@ declare(strict_types=1);
 
 namespace App\Events;
 
+use App\Events\Contracts\DifusionEnTiempoReal;
 use App\Models\Mensaje;
 use Illuminate\Broadcasting\Channel;
 use Illuminate\Broadcasting\InteractsWithSockets;
 use Illuminate\Broadcasting\PrivateChannel;
-use Illuminate\Contracts\Broadcasting\ShouldBroadcast;
-use Illuminate\Contracts\Events\ShouldDispatchAfterCommit;
 use Illuminate\Foundation\Events\Dispatchable;
 use Illuminate\Queue\SerializesModels;
 
@@ -18,14 +17,13 @@ use Illuminate\Queue\SerializesModels;
  * (MensajeController::store). Se difunde en el canal privado del viaje para
  * que tanto el cliente como el conductor reciban el mensaje en tiempo real.
  */
-class NuevoMensajeViaje implements ShouldBroadcast, ShouldDispatchAfterCommit
+class NuevoMensajeViaje implements DifusionEnTiempoReal
 {
     use Dispatchable, InteractsWithSockets, SerializesModels;
 
     public function __construct(
         public readonly Mensaje $mensaje,
-    ) {
-    }
+    ) {}
 
     /**
      * @return array<int, Channel>
