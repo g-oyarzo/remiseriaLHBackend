@@ -126,12 +126,32 @@ class MensajeController extends Controller
             ], Response::HTTP_CONFLICT);
         }
 
+        // La policy 'ver' también deja pasar a los administradores (pueden
+        // leer el historial), pero el chat es entre las dos partes del
+        // viaje: un admin que enviaba un mensaje quedaba registrado como
+        // emisor de una conversación cliente-conductor con el cliente como
+        // receptor implícito.
+        $emisorId = $request->user()->persona_id;
+
+        if ($emisorId !== $viaje->cliente_id && $emisorId !== $viaje->conductor_id) {
+            return response()->json([
+                'message' => 'Solo el cliente y el conductor del viaje pueden enviar mensajes.',
+            ], Response::HTTP_FORBIDDEN);
+        }
+
+        // Se eliminan caracteres de control (salvo saltos de línea y
+        // tabulaciones) antes de validar, para que un contenido formado solo
+        // por caracteres invisibles se rechace como vacío.
+        $request->merge([
+            'contenido' => is_string($request->input('contenido'))
+                ? trim((string) preg_replace('/[^\P{C}\n\t]/u', '', $request->input('contenido')))
+                : $request->input('contenido'),
+        ]);
+
         $validated = $request->validate([
             'contenido' => ['required', 'string', 'max:1000'],
         ]);
 
-        $cuenta = $request->user();
-        $emisorId = $cuenta->persona_id;
         $receptorId = ($emisorId === $viaje->cliente_id) ? $viaje->conductor_id : $viaje->cliente_id;
 
         $mensaje = Mensaje::query()->create([

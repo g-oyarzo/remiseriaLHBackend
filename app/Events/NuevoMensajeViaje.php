@@ -9,6 +9,7 @@ use Illuminate\Broadcasting\Channel;
 use Illuminate\Broadcasting\InteractsWithSockets;
 use Illuminate\Broadcasting\PrivateChannel;
 use Illuminate\Contracts\Broadcasting\ShouldBroadcast;
+use Illuminate\Contracts\Events\ShouldDispatchAfterCommit;
 use Illuminate\Foundation\Events\Dispatchable;
 use Illuminate\Queue\SerializesModels;
 
@@ -17,7 +18,7 @@ use Illuminate\Queue\SerializesModels;
  * (MensajeController::store). Se difunde en el canal privado del viaje para
  * que tanto el cliente como el conductor reciban el mensaje en tiempo real.
  */
-class NuevoMensajeViaje implements ShouldBroadcast
+class NuevoMensajeViaje implements ShouldBroadcast, ShouldDispatchAfterCommit
 {
     use Dispatchable, InteractsWithSockets, SerializesModels;
 

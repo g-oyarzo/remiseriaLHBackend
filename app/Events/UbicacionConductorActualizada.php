@@ -9,6 +9,7 @@ use Illuminate\Broadcasting\Channel;
 use Illuminate\Broadcasting\InteractsWithSockets;
 use Illuminate\Broadcasting\PrivateChannel;
 use Illuminate\Contracts\Broadcasting\ShouldBroadcast;
+use Illuminate\Contracts\Events\ShouldDispatchAfterCommit;
 use Illuminate\Foundation\Events\Dispatchable;
 use Illuminate\Queue\SerializesModels;
 
@@ -23,7 +24,7 @@ use Illuminate\Queue\SerializesModels;
  * activo asignado, también en el canal de ese viaje para que el cliente
  * pueda seguirlo en el mapa en tiempo real.
  */
-class UbicacionConductorActualizada implements ShouldBroadcast
+class UbicacionConductorActualizada implements ShouldBroadcast, ShouldDispatchAfterCommit
 {
     use Dispatchable, InteractsWithSockets, SerializesModels;
 
