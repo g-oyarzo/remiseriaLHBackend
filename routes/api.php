@@ -107,7 +107,10 @@ Route::middleware(['auth:sanctum', 'role:administrador'])->prefix('admin')->grou
         // para que el binding de ConductorController ($conductor) funcione.
         ->parameters(['conductores' => 'conductor']);
     Route::patch('/conductores/{conductor}/estado', [ConductorController::class, 'actualizarEstado']);
-    Route::apiResource('/vehiculos', VehiculoController::class);
+    // Sin destroy: no hay baja de vehículos en los casos de uso y borrar uno
+    // rompería el historial de viajes. Antes la ruta DELETE existía sin
+    // método en el controlador y respondía 500.
+    Route::apiResource('/vehiculos', VehiculoController::class)->only(['index', 'store', 'show', 'update']);
 
     Route::post('/viajes/registrar', [SolicitudViajeController::class, 'registrarTelefonico']);
     Route::post('/viajes/{viaje}/reasignar', [ViajeController::class, 'reasignar']);
