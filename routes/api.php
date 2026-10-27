@@ -8,6 +8,7 @@ use App\Http\Controllers\Api\V1\CotizacionController;
 use App\Http\Controllers\Api\V1\MarcaController;
 use App\Http\Controllers\Api\V1\MensajeController;
 use App\Http\Controllers\Api\V1\PagoController;
+use App\Http\Controllers\Api\V1\ReporteController;
 use App\Http\Controllers\Api\V1\SolicitudViajeController;
 use App\Http\Controllers\Api\V1\TarifaController;
 use App\Http\Controllers\Api\V1\UbicacionController;
@@ -113,6 +114,9 @@ Route::middleware(['auth:sanctum', 'role:administrador'])->prefix('admin')->grou
 
     Route::get('/pagos', [PagoController::class, 'index']);
     Route::patch('/pagos/{pago}/conciliar', [PagoController::class, 'conciliar']);
+
+    Route::get('/reportes/estadisticas', [ReporteController::class, 'estadisticas']);
+    Route::get('/reportes/exportar', [ReporteController::class, 'exportar'])->middleware('throttle:reportes');
     
     Route::get('/tarifas', [TarifaController::class, 'index']);
     Route::put('/tarifas', [TarifaController::class, 'actualizar']);
