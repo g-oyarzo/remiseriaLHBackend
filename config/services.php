@@ -35,4 +35,26 @@ return [
         ],
     ],
 
+    /*
+    | Servicio externo de ruteo usado por el cotizador (CU 02).
+    |
+    | driver: "osrm" (OpenStreetMap, servidor propio o público), "google"
+    | (Google Maps Routes API) o "ninguno". Por defecto es "ninguno": sin
+    | configuración explícita no se envían coordenadas de pasajeros a ningún
+    | tercero y el cotizador usa directamente la contingencia por zonas.
+    */
+    'mapas' => [
+        'driver' => env('MAPAS_DRIVER', 'ninguno'),
+        'timeout_segundos' => (float) env('MAPAS_TIMEOUT_SEGUNDOS', 3),
+        'reintentos' => (int) env('MAPAS_REINTENTOS', 1),
+        'cache_minutos' => (int) env('MAPAS_CACHE_MINUTOS', 10),
+        'osrm' => [
+            'url' => env('MAPAS_OSRM_URL'),
+        ],
+        'google' => [
+            'api_key' => env('GOOGLE_MAPS_API_KEY'),
+            'url' => env('GOOGLE_ROUTES_URL', 'https://routes.googleapis.com/directions/v2:computeRoutes'),
+        ],
+    ],
+
 ];
