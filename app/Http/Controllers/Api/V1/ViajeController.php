@@ -5,25 +5,25 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Api\V1;
 
 use App\Enums\EstadoViaje;
+use App\Enums\MetodoPago;
 use App\Enums\RolPersona;
 use App\Enums\TipoViaje;
 use App\Http\Controllers\Controller;
+use App\Http\Requests\ReservarViajeRequest;
+use App\Http\Requests\SolicitarViajeRequest;
 use App\Http\Resources\ViajeResource;
 use App\Models\Conductor;
-use App\Models\Pago;
-use App\Models\Tarifa;
 use App\Models\Viaje;
 use App\OpenApi\Schemas\CalificarViajeRequest as CalificarViajeRequestSchema;
 use App\OpenApi\Schemas\CrearViajeRequest as CrearViajeRequestSchema;
 use App\OpenApi\Schemas\ErrorResponse;
 use App\OpenApi\Schemas\PaginationMeta;
+use App\OpenApi\Schemas\ServerErrorResponse;
 use App\OpenApi\Schemas\ValidationErrorResponse;
 use App\OpenApi\Schemas\ViajeSchema;
-use App\ValueObjects\Coordinate;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Validation\Rules\Enum;
 use OpenApi\Attributes as OA;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -111,10 +111,10 @@ class ViajeController extends Controller
         ],
         responses: [
             new OA\Response(response: 200, description: 'OK.', content: new OA\JsonContent(properties: [new OA\Property(property: 'data', ref: ViajeSchema::class)])),
-            new OA\Response(response: 401, description: 'No autenticado.', content: new OA\JsonContent(ref: \App\OpenApi\Schemas\ErrorResponse::class)),
-            new OA\Response(response: 403, description: 'No tiene rol de cliente.', content: new OA\JsonContent(ref: \App\OpenApi\Schemas\ErrorResponse::class)),
-            new OA\Response(response: 422, description: 'Error de validación.', content: new OA\JsonContent(ref: \App\OpenApi\Schemas\ValidationErrorResponse::class)),
-            new OA\Response(response: 500, description: 'Error interno del servidor.', content: new OA\JsonContent(ref: \App\OpenApi\Schemas\ServerErrorResponse::class)),
+            new OA\Response(response: 401, description: 'No autenticado.', content: new OA\JsonContent(ref: ErrorResponse::class)),
+            new OA\Response(response: 403, description: 'No tiene rol de cliente.', content: new OA\JsonContent(ref: ErrorResponse::class)),
+            new OA\Response(response: 422, description: 'Error de validación.', content: new OA\JsonContent(ref: ValidationErrorResponse::class)),
+            new OA\Response(response: 500, description: 'Error interno del servidor.', content: new OA\JsonContent(ref: ServerErrorResponse::class)),
         ],
     )]
     public function show(Request $request, Viaje $viaje): JsonResponse
@@ -140,19 +140,21 @@ class ViajeController extends Controller
     }
 
     /**
-     * POST /api/v1/viajes
+     * POST /api/v1/cliente/viajes (compatibilidad)
      *
-     * Solicitar un nuevo viaje (solo clientes).
+     * Endpoint original de solicitud. Delega en el mismo flujo que
+     * /cliente/viajes/solicitar y /cliente/viajes/reservar (cotización en el
+     * servidor, snapshot y despacho), para no mantener dos implementaciones.
      */
     #[OA\Post(
         path: '/cliente/viajes',
-        summary: 'Solicitar un viaje',
-        description: 'Calcula el costo estimado con la tarifa vigente y la distancia en línea recta entre origen y destino (App\ValueObjects\Coordinate::distanciaEnMetrosHacia).',
+        summary: 'Solicitar o reservar un viaje (compatibilidad)',
+        description: 'Endpoint anterior, conservado por compatibilidad. Con tipo = "programado" equivale a POST /cliente/viajes/reservar; en otro caso a POST /cliente/viajes/solicitar. Si se omite metodo_pago se asume "efectivo".',
         tags: ['Viajes'],
         security: [['bearerAuth' => []]],
         requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(ref: CrearViajeRequestSchema::class)),
         responses: [
-            new OA\Response(response: 201, description: 'Viaje solicitado.', content: new OA\JsonContent(properties: [
+            new OA\Response(response: 201, description: 'Viaje solicitado o reservado.', content: new OA\JsonContent(properties: [
                 new OA\Property(property: 'message', type: 'string', example: 'Viaje solicitado exitosamente.'),
                 new OA\Property(property: 'data', ref: ViajeSchema::class),
             ])),
@@ -161,77 +163,21 @@ class ViajeController extends Controller
             new OA\Response(response: 422, description: 'Error de validación.', content: new OA\JsonContent(ref: ValidationErrorResponse::class)),
         ],
     )]
-    public function store(Request $request): JsonResponse
+    public function store(Request $request, SolicitudViajeController $solicitudes): JsonResponse
     {
-        $cuenta = $request->user();
-
-        if ($cuenta->rol !== RolPersona::Cliente) {
+        if ($request->user()->rol !== RolPersona::Cliente) {
             return response()->json([
                 'message' => 'Solo los clientes pueden solicitar viajes.',
             ], Response::HTTP_FORBIDDEN);
         }
 
-        $validated = $request->validate([
-            'origen_lat' => ['required', 'numeric', 'between:-90,90'],
-            'origen_lng' => ['required', 'numeric', 'between:-180,180'],
-            'destino_lat' => ['required', 'numeric', 'between:-90,90'],
-            'destino_lng' => ['required', 'numeric', 'between:-180,180'],
-            'origen_localidad' => ['nullable', 'string', 'max:100'],
-            'origen_calle' => ['nullable', 'string', 'max:100'],
-            'origen_numero' => ['nullable', 'string', 'max:15'],
-            'tipo' => ['sometimes', new Enum(TipoViaje::class)],
-            'fecha_viaje' => ['sometimes', 'date', 'after_or_equal:now'],
-        ]);
+        $request->mergeIfMissing(['metodo_pago' => MetodoPago::Efectivo->value]);
 
-        $tarifa = Tarifa::vigente();
-
-        if (! $tarifa) {
-            return response()->json([
-                'message' => 'No hay una tarifa vigente configurada.',
-            ], Response::HTTP_CONFLICT);
-        }
-
-        $origen = new Coordinate(
-            lat: (float) $validated['origen_lat'],
-            lng: (float) $validated['origen_lng'],
-        );
-
-        $destino = new Coordinate(
-            lat: (float) $validated['destino_lat'],
-            lng: (float) $validated['destino_lng'],
-        );
-
-        // Estimación de distancia para cálculo de costo.
-        //
-        // Corrección de auditoría (HALL-010): distanciaEnMetrosHacia() da la
-        // distancia en línea recta, que subestima sistemáticamente el
-        // recorrido real en una ciudad con cuadrícula de calles. Se aplica
-        // un factor de corrección configurable (ver config/remiseria.php)
-        // hasta integrar una API de ruteo real.
-        $distanciaLineaRectaKm = $origen->distanciaEnMetrosHacia($destino) / 1000;
-        $distanciaKm = $distanciaLineaRectaKm * (float) config('remiseria.factor_correccion_distancia');
-        $costoEstimado = $tarifa->calcularCosto($distanciaKm);
-
-        $viaje = Viaje::query()->create([
-            'cliente_id' => $cuenta->persona_id,
-            'tarifa_id' => $tarifa->id,
-            'origen' => $origen,
-            'destino' => $destino,
-            'origen_localidad' => $validated['origen_localidad'] ?? null,
-            'origen_calle' => $validated['origen_calle'] ?? null,
-            'origen_numero' => $validated['origen_numero'] ?? null,
-            'estado' => EstadoViaje::Solicitado,
-            'tipo' => TipoViaje::tryFrom($validated['tipo'] ?? '') ?? TipoViaje::Actual,
-            'costo' => $costoEstimado,
-            'fecha_viaje' => $validated['fecha_viaje'] ?? now(),
-        ]);
-
-        $viaje->load(['cliente.persona', 'tarifa']);
-
-        return response()->json([
-            'message' => 'Viaje solicitado exitosamente.',
-            'data' => ViajeResource::arreglo($viaje, $request),
-        ], Response::HTTP_CREATED);
+        // Resolver el FormRequest desde el contenedor lo valida contra la
+        // request actual.
+        return $request->input('tipo') === TipoViaje::Programado->value
+            ? $solicitudes->reservar(app(ReservarViajeRequest::class))
+            : $solicitudes->solicitar(app(SolicitarViajeRequest::class));
     }
 
     /**
@@ -436,7 +382,7 @@ class ViajeController extends Controller
     #[OA\Patch(
         path: '/viajes/{viaje}/cancelar',
         summary: 'Cancelar un viaje',
-        description: 'Solo el cliente que lo solicitó o un administrador; los conductores no pueden cancelar. No se puede cancelar un viaje ya finalizado o ya cancelado.',
+        description: 'Solo el cliente que lo solicitó o un administrador; los conductores no pueden cancelar. El cliente puede cancelar reservas, solicitudes y viajes aceptados; un viaje en curso solo puede cancelarlo un administrador. No se puede cancelar un viaje finalizado o ya cancelado.',
         tags: ['Viajes'],
         security: [['bearerAuth' => []]],
         parameters: [new OA\Parameter(name: 'viaje', in: 'path', required: true, schema: new OA\Schema(type: 'integer'))],
@@ -447,7 +393,7 @@ class ViajeController extends Controller
             ])),
             new OA\Response(response: 403, description: 'Un conductor intentó cancelar, o el cliente no es dueño del viaje.', content: new OA\JsonContent(ref: ErrorResponse::class)),
             new OA\Response(response: 404, description: 'Viaje inexistente.', content: new OA\JsonContent(ref: ErrorResponse::class)),
-            new OA\Response(response: 409, description: 'El viaje ya finalizó o ya estaba cancelado.', content: new OA\JsonContent(ref: ErrorResponse::class)),
+            new OA\Response(response: 409, description: 'El viaje ya finalizó o ya estaba cancelado, o el cliente intentó cancelar un viaje en curso.', content: new OA\JsonContent(ref: ErrorResponse::class)),
         ],
     )]
     public function cancelar(Request $request, Viaje $viaje): JsonResponse
@@ -474,7 +420,32 @@ class ViajeController extends Controller
             ], Response::HTTP_FORBIDDEN);
         }
 
-        $viaje->update(['estado' => EstadoViaje::Cancelado]);
+        // La transición se hace con la fila bloqueada para que una
+        // aceptación, un inicio o una finalización concurrentes no se
+        // pisen con la cancelación: se re-chequea el estado ya bloqueado.
+        try {
+            $viaje = DB::transaction(function () use ($viaje, $cuenta): Viaje {
+                $actual = Viaje::query()->lockForUpdate()->findOrFail($viaje->id);
+
+                if ($actual->estado->esFinal()) {
+                    throw new \RuntimeException('No se puede cancelar un viaje que ya finalizó o fue cancelado.');
+                }
+
+                // Integridad financiera: un viaje en curso ya está prestando
+                // el servicio; si el cliente pudiera cancelarlo a mitad de
+                // camino, el viaje quedaría sin cobro. Solo un administrador
+                // puede hacerlo.
+                if ($actual->estado === EstadoViaje::EnCurso && $cuenta->rol !== RolPersona::Administrador) {
+                    throw new \RuntimeException('Un viaje en curso solo puede cancelarlo un administrador.');
+                }
+
+                $actual->update(['estado' => EstadoViaje::Cancelado]);
+
+                return $actual;
+            });
+        } catch (\RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], Response::HTTP_CONFLICT);
+        }
 
         return response()->json([
             'message' => 'Viaje cancelado.',

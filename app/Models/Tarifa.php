@@ -59,11 +59,6 @@ class Tarifa extends Model
         return $query->where('activa', true);
     }
 
-    public function calcularCosto(float $kilometros): float
-    {
-        return (float) $this->precio_base + ($kilometros * (float) $this->precio_por_km);
-    }
-
     /**
      * Devuelve la tarifa vigente en este momento (CU 02, CU 24).
      *
