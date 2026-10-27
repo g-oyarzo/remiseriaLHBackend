@@ -29,6 +29,7 @@ use App\Services\Geolocalizacion\RegistroDeUbicaciones;
 use App\Services\Geolocalizacion\UbicacionInconsistente;
 use App\Services\Viajes\FinalizacionDeViajes;
 use App\Services\Viajes\FinalizacionNoPermitida;
+use App\Services\Viajes\TransicionDeViajeInvalida;
 use App\ValueObjects\Coordinate;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -498,7 +499,7 @@ class ViajeController extends Controller
                 $actual = Viaje::query()->lockForUpdate()->findOrFail($viaje->id);
 
                 if ($actual->estado->esFinal()) {
-                    throw new \RuntimeException('No se puede cancelar un viaje que ya finalizó o fue cancelado.');
+                    throw new TransicionDeViajeInvalida('No se puede cancelar un viaje que ya finalizó o fue cancelado.');
                 }
 
                 // Integridad financiera: un viaje en curso ya está prestando
@@ -506,7 +507,7 @@ class ViajeController extends Controller
                 // camino, el viaje quedaría sin cobro. Solo un administrador
                 // puede hacerlo.
                 if ($actual->estado === EstadoViaje::EnCurso && $cuenta->rol !== RolPersona::Administrador) {
-                    throw new \RuntimeException('Un viaje en curso solo puede cancelarlo un administrador.');
+                    throw new TransicionDeViajeInvalida('Un viaje en curso solo puede cancelarlo un administrador.');
                 }
 
                 $asignador->retirarOfertas($actual);
@@ -514,7 +515,7 @@ class ViajeController extends Controller
 
                 return $actual;
             });
-        } catch (\RuntimeException $e) {
+        } catch (TransicionDeViajeInvalida $e) {
             return response()->json(['message' => $e->getMessage()], Response::HTTP_CONFLICT);
         }
 
@@ -574,7 +575,22 @@ class ViajeController extends Controller
             'calificacion' => ['required', 'integer', 'between:1,5'],
         ]);
 
-        $viaje->update(['calificacion' => $validated['calificacion']]);
+        // UPDATE condicional: si dos requests pasan el chequeo anterior a la
+        // vez, solo una escribe (la otra afecta 0 filas) y el viaje no se
+        // califica dos veces ni se pisa la primera nota.
+        $calificado = Viaje::query()
+            ->whereKey($viaje->id)
+            ->where('estado', EstadoViaje::Finalizado)
+            ->whereNull('calificacion')
+            ->update(['calificacion' => $validated['calificacion']]);
+
+        if ($calificado === 0) {
+            return response()->json([
+                'message' => 'El viaje ya fue calificado.',
+            ], Response::HTTP_CONFLICT);
+        }
+
+        $viaje->refresh();
 
         // Corrección de auditoría (HALL-018): antes el promedio se
         // recalculaba con avg() fuera de cualquier transacción o lock. Dos
