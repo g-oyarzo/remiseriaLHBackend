@@ -48,6 +48,40 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Geolocalización de conductores (RNF02)
+    |--------------------------------------------------------------------------
+    |
+    | - cache_store: store de cache donde vive el último ping de cada
+    |   conductor (Redis en producción). Si no está disponible se usa la
+    |   base de datos como respaldo.
+    | - persistir_cada_segundos: con el store disponible, la posición se
+    |   persiste en MySQL (para la búsqueda espacial de la asignación) a lo
+    |   sumo cada N segundos.
+    | - velocidad_maxima_kmh: un ping que implica una velocidad mayor
+    |   respecto del anterior se rechaza como inconsistente (salto de GPS o
+    |   ubicación falsificada).
+    | - salto_minimo_metros: desplazamientos menores se consideran ruido del
+    |   GPS y no suman al recorrido del viaje.
+    | - precision_maxima_metros: pings con una precisión informada peor que
+    |   esto actualizan la posición pero no suman al recorrido.
+    |
+    | Límite de confianza: las coordenadas provienen del dispositivo del
+    | conductor. Estas validaciones descartan errores groseros, pero no
+    | pueden detectar una falsificación consistente del GPS.
+    |
+    */
+
+    'ubicacion' => [
+        'cache_store' => env('UBICACION_CACHE_STORE', 'redis'),
+        'ttl_segundos' => (int) env('UBICACION_TTL_SEGUNDOS', 600),
+        'persistir_cada_segundos' => (int) env('UBICACION_PERSISTIR_CADA_SEGUNDOS', 15),
+        'velocidad_maxima_kmh' => (float) env('UBICACION_VELOCIDAD_MAXIMA_KMH', 200),
+        'salto_minimo_metros' => (float) env('UBICACION_SALTO_MINIMO_METROS', 10),
+        'precision_maxima_metros' => (float) env('UBICACION_PRECISION_MAXIMA_METROS', 50),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Asignación automática de conductores (CU 03)
     |--------------------------------------------------------------------------
     |

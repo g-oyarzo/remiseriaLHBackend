@@ -35,6 +35,8 @@
         <env name="MAIL_MAILER" value="array"/>
         <!-- Las difusiones en tiempo real se descartan (ver config/queue.php). -->
         <env name="DIFUSION_CONEXION_COLA" value="descartar" force="true"/>
+        <!-- Último ping GPS en memoria (sin depender de Redis). -->
+        <env name="UBICACION_CACHE_STORE" value="array" force="true"/>
         <!-- Los tests nunca deben llamar a un servicio de mapas real. -->
         <env name="MAPAS_DRIVER" value="ninguno" force="true"/>
         <env name="QUEUE_CONNECTION" value="sync"/>

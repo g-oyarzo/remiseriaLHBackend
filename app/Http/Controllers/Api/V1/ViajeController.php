@@ -330,19 +330,39 @@ class ViajeController extends Controller
 
         $this->authorize('ver', $viaje);
 
-        if ($viaje->estado !== EstadoViaje::Aceptado) {
-            return response()->json([
-                'message' => 'El viaje debe estar en estado "aceptado" para iniciarlo.',
-            ], Response::HTTP_CONFLICT);
-        }
-
         if ($viaje->conductor_id !== $request->user()->persona_id) {
             return response()->json([
                 'message' => 'Solo el conductor asignado puede iniciar el viaje.',
             ], Response::HTTP_FORBIDDEN);
         }
 
-        $viaje->update(['estado' => EstadoViaje::EnCurso]);
+        // Con la fila bloqueada y el estado re-chequeado: sin esto, una
+        // cancelación confirmada entre la lectura y el update quedaba pisada
+        // y el viaje cancelado pasaba a "en curso".
+        $iniciado = DB::transaction(function () use ($viaje): ?Viaje {
+            $actual = Viaje::query()->lockForUpdate()->findOrFail($viaje->id);
+
+            if ($actual->estado !== EstadoViaje::Aceptado) {
+                return null;
+            }
+
+            $actual->update([
+                'estado' => EstadoViaje::EnCurso,
+                'iniciado_en' => now(),
+                'distancia_recorrida_metros' => 0,
+                'puntos_seguimiento' => 0,
+            ]);
+
+            return $actual;
+        });
+
+        if ($iniciado === null) {
+            return response()->json([
+                'message' => 'El viaje debe estar en estado "aceptado" para iniciarlo.',
+            ], Response::HTTP_CONFLICT);
+        }
+
+        $viaje = $iniciado;
 
         return response()->json([
             'message' => 'Viaje iniciado.',
