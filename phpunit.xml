@@ -19,6 +19,15 @@
     </source>
     <php>
         <env name="APP_ENV" value="testing"/>
+        <!-- Valores exclusivos de test (no son secretos de ningún entorno):
+             permiten correr la suite sin un .env local. -->
+        <env name="APP_KEY" value="base64:dGVzdC1rZXktcmVtaXNlcmlhLWxoLXNvbG8tdGVzdHM="/>
+        <env name="REVERB_APP_ID" value="test-app"/>
+        <env name="REVERB_APP_KEY" value="test-key"/>
+        <env name="REVERB_APP_SECRET" value="test-secret"/>
+        <env name="REVERB_HOST" value="localhost"/>
+        <env name="REVERB_PORT" value="8080"/>
+        <env name="REVERB_SCHEME" value="http"/>
         <env name="APP_MAINTENANCE_DRIVER" value="file"/>
         <env name="BCRYPT_ROUNDS" value="4"/>
         <!-- reverb en lugar de null: NullBroadcaster.auth() es un no-op que siempre
