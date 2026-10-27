@@ -2,8 +2,13 @@
 
 namespace App\Providers;
 
+use App\Services\Mapas\GoogleRoutesProveedorDistancia;
+use App\Services\Mapas\OsrmProveedorDistancia;
+use App\Services\Mapas\ProveedorDistancia;
+use App\Services\Mapas\SinProveedorDistancia;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
 
@@ -14,7 +19,33 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        // Una configuración incompleta no debe dejar sin cotizaciones a la
+        // operación: se registra el error y se usa la contingencia por zonas.
+        $this->app->bind(ProveedorDistancia::class, function (): ProveedorDistancia {
+            $config = config('services.mapas');
+
+            $proveedor = match ($config['driver']) {
+                'osrm' => filled($config['osrm']['url'] ?? null)
+                    ? new OsrmProveedorDistancia($config['osrm']['url'])
+                    : 'falta MAPAS_OSRM_URL',
+                'google' => filled($config['google']['api_key'] ?? null)
+                    ? new GoogleRoutesProveedorDistancia($config['google']['api_key'], $config['google']['url'])
+                    : 'falta GOOGLE_MAPS_API_KEY',
+                'ninguno' => new SinProveedorDistancia,
+                default => 'driver desconocido',
+            };
+
+            if (is_string($proveedor)) {
+                Log::error('Servicio de mapas mal configurado; se usa la contingencia por zonas.', [
+                    'driver' => $config['driver'],
+                    'motivo' => $proveedor,
+                ]);
+
+                return new SinProveedorDistancia;
+            }
+
+            return $proveedor;
+        });
     }
 
     /**

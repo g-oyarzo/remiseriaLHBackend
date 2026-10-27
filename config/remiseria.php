@@ -48,6 +48,23 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Cotización (CU 02)
+    |--------------------------------------------------------------------------
+    |
+    | Límites de cordura del trayecto cotizado, medidos en línea recta:
+    | origen y destino a menos de distancia_minima_metros se consideran el
+    | mismo punto, y no se cotizan viajes más largos que distancia_maxima_km.
+    | El servicio de mapas se configura en config/services.php ("mapas").
+    |
+    */
+
+    'cotizacion' => [
+        'distancia_minima_metros' => (float) env('COTIZACION_DISTANCIA_MINIMA_METROS', 50),
+        'distancia_maxima_km' => (float) env('COTIZACION_DISTANCIA_MAXIMA_KM', 300),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Límites de frecuencia (solicitudes por minuto)
     |--------------------------------------------------------------------------
     |

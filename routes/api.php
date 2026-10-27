@@ -3,6 +3,7 @@
 use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\ClienteController;
 use App\Http\Controllers\Api\V1\ConductorController;
+use App\Http\Controllers\Api\V1\CotizacionController;
 use App\Http\Controllers\Api\V1\MarcaController;
 use App\Http\Controllers\Api\V1\MensajeController;
 use App\Http\Controllers\Api\V1\PagoController;
@@ -47,6 +48,12 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/viajes/{viaje}/mensajes', [MensajeController::class, 'store'])->middleware('throttle:chat');
     Route::patch('/viajes/{viaje}/mensajes/marcar-leidos', [MensajeController::class, 'marcarLeidos']);
 });
+
+// Cotización (CU 02): apps de clientes y panel administrativo. Tiene su
+// propio límite porque cada llamada puede consumir cuota del servicio de
+// mapas.
+Route::middleware(['auth:sanctum', 'role:cliente,administrador', 'throttle:cotizar'])
+    ->post('/viajes/cotizar', [CotizacionController::class, 'cotizar']);
 
 // Rutas Cliente
 Route::middleware(['auth:sanctum', 'role:cliente'])->prefix('cliente')->group(function () {
