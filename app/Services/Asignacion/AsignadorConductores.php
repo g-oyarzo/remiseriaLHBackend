@@ -37,8 +37,11 @@ final class AsignadorConductores
 {
     /**
      * Busca el mejor candidato y le ofrece el viaje.
+     *
+     * $reintento es la cantidad de búsquedas previas sin candidatos: con
+     * cada una el radio de búsqueda se amplía (ver radioDeBusqueda()).
      */
-    public function buscarYOfrecer(int $viajeId): ResultadoBusqueda
+    public function buscarYOfrecer(int $viajeId, int $reintento = 0): ResultadoBusqueda
     {
         $viaje = Viaje::query()->find($viajeId);
 
@@ -48,7 +51,7 @@ final class AsignadorConductores
 
         // La consulta de candidatos (la más costosa) se hace fuera de la
         // transacción; cada candidato se re-valida con su fila bloqueada.
-        $candidatos = $this->candidatos($viaje);
+        $candidatos = $this->candidatos($viaje, self::radioDeBusqueda($reintento));
 
         return DB::transaction(function () use ($viajeId, $candidatos): ResultadoBusqueda {
             $viaje = Viaje::query()->lockForUpdate()->find($viajeId);
@@ -98,7 +101,7 @@ final class AsignadorConductores
      *
      * @return Collection<int, Candidato>
      */
-    public function candidatos(Viaje $viaje): Collection
+    public function candidatos(Viaje $viaje, ?int $radioMetros = null): Collection
     {
         $config = config('remiseria.asignacion');
         $pesos = $config['pesos'];
@@ -108,7 +111,7 @@ final class AsignadorConductores
             ->where('ubicacion_actualizada_en', '>=', now()->subSeconds((int) $config['ubicacion_vigencia_segundos']))
             ->whereDoesntHave('asignaciones', fn ($q) => $q->where('viaje_id', $viaje->id))
             ->whereDoesntHave('asignaciones', fn ($q) => $q->pendientes())
-            ->cercanos($viaje->origen, (float) $config['radio_busqueda_metros'])
+            ->cercanos($viaje->origen, (float) ($radioMetros ?? self::radioDeBusqueda(0)))
             ->withCount(['viajes as viajes_hoy' => fn ($q) => $q
                 ->where('estado', EstadoViaje::Finalizado)
                 ->where('fecha_viaje', '>=', today())])
@@ -270,6 +273,22 @@ final class AsignadorConductores
         });
 
         return $reiniciada;
+    }
+
+    /**
+     * Radio de búsqueda para el reintento N: parte de radio_busqueda_metros
+     * y se amplía radio_expansion_paso_metros por cada búsqueda previa sin
+     * candidatos, sin superar radio_maximo_metros.
+     */
+    public static function radioDeBusqueda(int $reintento): int
+    {
+        $config = config('remiseria.asignacion');
+        $base = (int) $config['radio_busqueda_metros'];
+
+        return min(
+            max($base, (int) $config['radio_maximo_metros']),
+            $base + max(0, $reintento) * (int) $config['radio_expansion_paso_metros'],
+        );
     }
 
     private function buscandoConductor(?Viaje $viaje): bool

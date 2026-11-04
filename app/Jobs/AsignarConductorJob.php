@@ -13,7 +13,8 @@ use Illuminate\Foundation\Queue\Queueable;
 /**
  * Job de asignación automática de conductor (CU 03).
  *
- * Si no hay candidatos se vuelve a encolar con una demora, hasta
+ * Si no hay candidatos se vuelve a encolar con una demora, ampliando el
+ * radio de búsqueda en cada intento, hasta
  * max_reintentos_sin_candidatos veces; después la búsqueda se marca como
  * agotada y se avisa al administrador. Ejecutar el job varias veces para el
  * mismo viaje es seguro: el servicio bloquea el viaje y no crea una segunda
@@ -37,7 +38,7 @@ class AsignarConductorJob implements ShouldQueue
 
     public function handle(AsignadorConductores $asignador): void
     {
-        if ($asignador->buscarYOfrecer($this->viajeId) !== ResultadoBusqueda::SinCandidatos) {
+        if ($asignador->buscarYOfrecer($this->viajeId, $this->reintentoSinCandidatos) !== ResultadoBusqueda::SinCandidatos) {
             return;
         }
 

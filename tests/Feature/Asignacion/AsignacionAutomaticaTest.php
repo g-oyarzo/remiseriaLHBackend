@@ -43,6 +43,8 @@ class AsignacionAutomaticaTest extends TestCase
         $this->origen = new Coordinate(lat: -34.9214, lng: -57.9544);
         config([
             'remiseria.asignacion.radio_busqueda_metros' => 10000,
+            'remiseria.asignacion.radio_expansion_paso_metros' => 2500,
+            'remiseria.asignacion.radio_maximo_metros' => 20000,
             'remiseria.asignacion.ubicacion_vigencia_segundos' => 120,
             'remiseria.asignacion.tiempo_aceptacion_segundos' => 30,
             'remiseria.asignacion.max_ofertas' => 10,
@@ -114,6 +116,39 @@ class AsignacionAutomaticaTest extends TestCase
         $this->asignador()->buscarYOfrecer($viaje->id);
 
         $this->assertSame($mejor->persona_id, $this->ofertaPendiente($viaje)->conductor_id);
+    }
+
+    public function test_el_radio_de_busqueda_se_amplia_en_cada_reintento_hasta_el_maximo(): void
+    {
+        $this->assertSame(10000, AsignadorConductores::radioDeBusqueda(0));
+        $this->assertSame(12500, AsignadorConductores::radioDeBusqueda(1));
+        $this->assertSame(17500, AsignadorConductores::radioDeBusqueda(3));
+        $this->assertSame(20000, AsignadorConductores::radioDeBusqueda(10));
+    }
+
+    public function test_un_conductor_fuera_del_radio_inicial_se_encuentra_al_ampliarlo(): void
+    {
+        $lejos = $this->conductor(12000);
+        $viaje = $this->viaje();
+
+        $this->assertSame(ResultadoBusqueda::SinCandidatos, $this->asignador()->buscarYOfrecer($viaje->id, reintento: 0));
+        $this->assertSame(ResultadoBusqueda::Ofrecida, $this->asignador()->buscarYOfrecer($viaje->id, reintento: 1));
+
+        $this->assertSame($lejos->persona_id, $this->ofertaPendiente($viaje)->conductor_id);
+    }
+
+    public function test_el_job_amplia_el_radio_al_reintentar_sin_candidatos(): void
+    {
+        config(['remiseria.asignacion.max_reintentos_sin_candidatos' => 5]);
+        $lejos = $this->conductor(16000);
+        $viaje = $this->viaje();
+
+        // Con la cola sync los reintentos corren en cadena: 10 km, 12,5 km,
+        // 15 km y 17,5 km, donde aparece el conductor.
+        AsignarConductorJob::dispatchSync($viaje->id);
+
+        $this->assertSame($lejos->persona_id, $this->ofertaPendiente($viaje)?->conductor_id);
+        $this->assertNull($viaje->fresh()->busqueda_agotada_en);
     }
 
     public function test_no_considera_conductores_con_ubicacion_vieja_ni_fuera_del_radio(): void
