@@ -23,6 +23,7 @@ use OpenApi\Attributes as OA;
         new OA\Property(property: 'destino_localidad', type: 'string', maxLength: 100, nullable: true, example: 'La Plata'),
         new OA\Property(property: 'destino_calle', type: 'string', maxLength: 100, nullable: true, example: 'Calle 50'),
         new OA\Property(property: 'destino_numero', type: 'string', maxLength: 15, nullable: true, example: '1200'),
+        new OA\Property(property: 'cotizacion_id', type: 'string', format: 'uuid', nullable: true, description: 'Precio cerrado: id devuelto por POST /viajes/cotizar. Si se envía, se cobra exactamente ese monto (409 si venció o ya se usó). Excluyente con monto_confirmado.'),
         new OA\Property(property: 'monto_confirmado', type: 'number', format: 'float', nullable: true, example: 2450.00, description: 'Opcional. Monto que el cliente aceptó al cotizar; si no coincide con la cotización vigente se responde 409 con la nueva cotización.'),
     ],
 )]

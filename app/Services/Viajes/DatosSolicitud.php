@@ -29,5 +29,8 @@ final readonly class DatosSolicitud
         public ?string $montoConfirmado = null,
         public string $canal = 'app',
         public ?int $registradoPorPersonaId = null,
+        // Precio cerrado: cotización emitida a usar y cuenta que la pidió.
+        public ?string $cotizacionId = null,
+        public ?int $cuentaId = null,
     ) {}
 }

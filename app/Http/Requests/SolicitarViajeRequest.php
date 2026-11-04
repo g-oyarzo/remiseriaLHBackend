@@ -11,8 +11,9 @@ use Illuminate\Validation\Rules\Enum;
 
 /**
  * CU 01 - Solicitar viaje inmediato: origen, destino y método de pago
- * (CU 21). "monto_confirmado" es opcional: si se envía, debe coincidir con
- * la cotización que calcula el servidor en ese momento.
+ * (CU 21). Precio cerrado: con "cotizacion_id" se cobra exactamente el
+ * monto cotizado; sin él se cotiza en el momento y, si se envía
+ * "monto_confirmado", debe coincidir con esa cotización.
  */
 class SolicitarViajeRequest extends CotizarViajeRequest
 {
@@ -30,6 +31,9 @@ class SolicitarViajeRequest extends CotizarViajeRequest
             'destino_calle' => ['nullable', 'string', 'max:100'],
             'destino_numero' => ['nullable', 'string', 'max:15'],
             'monto_confirmado' => ['nullable', 'numeric', 'gt:0', 'decimal:0,2'],
+            // Cotización emitida por POST /viajes/cotizar: si se envía, se
+            // cobra exactamente ese monto (precio cerrado).
+            'cotizacion_id' => ['nullable', 'uuid', 'prohibits:monto_confirmado'],
         ];
     }
 
@@ -56,6 +60,8 @@ class SolicitarViajeRequest extends CotizarViajeRequest
             montoConfirmado: $montoConfirmado !== null ? (string) $montoConfirmado : null,
             canal: $canal,
             registradoPorPersonaId: $registradoPor,
+            cotizacionId: $this->validated('cotizacion_id'),
+            cuentaId: $this->user()->id,
         );
     }
 }
