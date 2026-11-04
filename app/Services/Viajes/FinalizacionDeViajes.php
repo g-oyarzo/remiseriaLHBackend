@@ -6,10 +6,8 @@ namespace App\Services\Viajes;
 
 use App\Casts\PointCast;
 use App\Enums\EstadoViaje;
-use App\Enums\MetodoCotizacion;
 use App\Models\Conductor;
 use App\Models\Viaje;
-use App\Services\Cotizacion\CotizadorService;
 use App\Services\Geolocalizacion\RegistroDeUbicaciones;
 use App\Support\Dinero;
 use Illuminate\Support\Facades\DB;
@@ -23,8 +21,8 @@ use Symfony\Component\HttpFoundation\Response;
  * envía su posición junto con la finalización, entra como un ping más, con
  * la misma validación de plausibilidad.
  *
- * El precio final se calcula con los valores de tarifa guardados en el
- * viaje al cotizarlo, de modo que un cambio de tarifa posterior no lo altera.
+ * El importe a cobrar es el cotizado al solicitar el viaje (precio
+ * cerrado): ni el recorrido real ni un cambio de tarifa posterior lo alteran.
  */
 final class FinalizacionDeViajes
 {
@@ -100,6 +98,10 @@ final class FinalizacionDeViajes
     /**
      * Distancia, duración y monto finales.
      *
+     * Precio cerrado (decisión del negocio): se cobra siempre lo cotizado al
+     * solicitar el viaje. La distancia y la duración reales se registran
+     * como información del viaje, pero no modifican el importe.
+     *
      * @return array<string, mixed>
      */
     private function cierre(Viaje $viaje): array
@@ -111,19 +113,7 @@ final class FinalizacionDeViajes
         $seguimientoConfiable = $viaje->puntos_seguimiento >= (int) config('remiseria.finalizacion.minimo_puntos_seguimiento')
             && $viaje->distancia_recorrida_metros > 0;
 
-        [$precioBase, $precioPorKm] = $this->valoresDeTarifa($viaje);
-
-        if ($viaje->metodo_cotizacion === MetodoCotizacion::Zona && $viaje->costo !== null) {
-            // Se cotizó con el monto fijo de la zona: se respeta lo pactado.
-            $costoFinal = Dinero::desdeCentavos(Dinero::aCentavos((string) $viaje->costo));
-            $origen = 'zona';
-        } elseif ($seguimientoConfiable && $precioBase !== null) {
-            $costoFinal = CotizadorService::montoParaDistancia($precioBase, $precioPorKm, $viaje->distancia_recorrida_metros);
-            $origen = 'recorrido';
-        } else {
-            $costoFinal = $viaje->costo !== null ? Dinero::desdeCentavos(Dinero::aCentavos((string) $viaje->costo)) : null;
-            $origen = 'estimado';
-        }
+        $costoFinal = $viaje->costo !== null ? Dinero::desdeCentavos(Dinero::aCentavos((string) $viaje->costo)) : null;
 
         return [
             'duracion_final_min' => $duracion,
@@ -131,27 +121,7 @@ final class FinalizacionDeViajes
                 ? round($viaje->distancia_recorrida_metros / 1000, 3)
                 : $viaje->distancia_estimada_km,
             'costo_final' => $costoFinal,
-            'costo_final_origen' => $costoFinal !== null ? $origen : null,
+            'costo_final_origen' => $costoFinal !== null ? 'cotizado' : null,
         ];
-    }
-
-    /**
-     * Tarifa con la que se cotizó el viaje: el snapshot guardado en el
-     * viaje o, para viajes anteriores a ese snapshot, la versión de tarifa
-     * referenciada (las versiones no se modifican, se reemplazan).
-     *
-     * @return array{0: ?string, 1: ?string}
-     */
-    private function valoresDeTarifa(Viaje $viaje): array
-    {
-        if ($viaje->precio_base_aplicado !== null && $viaje->precio_por_km_aplicado !== null) {
-            return [(string) $viaje->precio_base_aplicado, (string) $viaje->precio_por_km_aplicado];
-        }
-
-        $tarifa = $viaje->tarifa;
-
-        return $tarifa !== null
-            ? [(string) $tarifa->precio_base, (string) $tarifa->precio_por_km]
-            : [null, null];
     }
 }
