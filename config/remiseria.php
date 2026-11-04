@@ -109,6 +109,8 @@ return [
     | - tiempo_aceptacion_segundos: vencimiento de cada oferta.
     | - radio_busqueda_metros: solo se consideran conductores a esa distancia
     |   (en línea recta) del origen; es el criterio de "zona geográfica".
+    |   Si no hay candidatos, cada reintento amplía el radio en
+    |   radio_expansion_paso_metros hasta radio_maximo_metros.
     | - ubicacion_vigencia_segundos: un conductor cuyo último ping GPS es más
     |   viejo que esto no se considera (no se supone que siga cerca).
     | - max_ofertas: tope de conductores a los que se ofrece un mismo viaje.
@@ -128,6 +130,8 @@ return [
     'asignacion' => [
         'tiempo_aceptacion_segundos' => (int) env('ASIGNACION_TIEMPO_ACEPTACION_SEGUNDOS', 30),
         'radio_busqueda_metros' => (int) env('ASIGNACION_RADIO_BUSQUEDA_METROS', 10000),
+        'radio_expansion_paso_metros' => (int) env('ASIGNACION_RADIO_EXPANSION_PASO_METROS', 2500),
+        'radio_maximo_metros' => (int) env('ASIGNACION_RADIO_MAXIMO_METROS', 20000),
         'ubicacion_vigencia_segundos' => (int) env('ASIGNACION_UBICACION_VIGENCIA_SEGUNDOS', 120),
         'max_ofertas' => (int) env('ASIGNACION_MAX_OFERTAS', 10),
         'reintento_sin_candidatos_segundos' => (int) env('ASIGNACION_REINTENTO_SEGUNDOS', 30),
@@ -148,13 +152,13 @@ return [
     |
     | Una reserva debe pedirse con al menos anticipacion_minima_minutos (un
     | viaje para dentro de menos tiempo es una solicitud inmediata) y con no
-    | más de anticipacion_maxima_dias. Ambos valores son supuestos operativos
-    | configurables, no reglas tomadas de la documentación del negocio.
+    | más de anticipacion_maxima_dias (definidos por el negocio: 60 minutos y
+    | 30 días).
     |
     */
 
     'reservas' => [
-        'anticipacion_minima_minutos' => (int) env('RESERVA_ANTICIPACION_MINIMA_MINUTOS', 30),
+        'anticipacion_minima_minutos' => (int) env('RESERVA_ANTICIPACION_MINIMA_MINUTOS', 60),
         'anticipacion_maxima_dias' => (int) env('RESERVA_ANTICIPACION_MAXIMA_DIAS', 30),
     ],
 
