@@ -36,6 +36,23 @@ return [
     ],
 
     /*
+    | Servicio de clima para el recargo dinámico por lluvia.
+    |
+    | driver: "openmeteo" o "ninguno" (por defecto: sin recargo por clima).
+    | La API pública de Open-Meteo es solo para uso no comercial; en
+    | producción usar un plan con API key (customer-api.open-meteo.com).
+    */
+    'clima' => [
+        'driver' => env('CLIMA_DRIVER', 'ninguno'),
+        'timeout_segundos' => (float) env('CLIMA_TIMEOUT_SEGUNDOS', 2),
+        'cache_minutos' => (int) env('CLIMA_CACHE_MINUTOS', 10),
+        'openmeteo' => [
+            'url' => env('CLIMA_OPENMETEO_URL', 'https://api.open-meteo.com/v1/forecast'),
+            'api_key' => env('CLIMA_OPENMETEO_API_KEY'),
+        ],
+    ],
+
+    /*
     | Servicio externo de ruteo usado por el cotizador (CU 02).
     |
     | driver: "osrm" (OpenStreetMap, servidor propio o público), "google"

@@ -23,7 +23,29 @@ final readonly class Cotizacion
         public string $precioPorKm,
         public ?int $zonaTarifariaId = null,
         public ?string $proveedorMapas = null,
+        public ?string $montoBase = null,
+        public ?Recargo $recargo = null,
     ) {}
+
+    /**
+     * Misma cotización con el recargo dinámico aplicado sobre el monto.
+     */
+    public function conRecargo(Recargo $recargo): self
+    {
+        return new self(
+            monto: $recargo->aplicar($this->monto),
+            distanciaKm: $this->distanciaKm,
+            duracionMinutos: $this->duracionMinutos,
+            metodo: $this->metodo,
+            tarifaId: $this->tarifaId,
+            precioBase: $this->precioBase,
+            precioPorKm: $this->precioPorKm,
+            zonaTarifariaId: $this->zonaTarifariaId,
+            proveedorMapas: $this->proveedorMapas,
+            montoBase: $this->monto,
+            recargo: $recargo,
+        );
+    }
 
     /**
      * @return array<string, mixed>
@@ -32,6 +54,8 @@ final readonly class Cotizacion
     {
         return [
             'monto' => $this->monto,
+            'monto_base' => $this->montoBase ?? $this->monto,
+            'recargo' => ($this->recargo ?? Recargo::ninguno())->toArray(),
             'distancia_km' => $this->distanciaKm,
             'duracion_minutos' => $this->duracionMinutos,
             'metodo' => $this->metodo->value,
@@ -54,6 +78,9 @@ final readonly class Cotizacion
         return [
             'tarifa_id' => $this->tarifaId,
             'costo' => $this->monto,
+            'monto_base_cotizado' => $this->montoBase ?? $this->monto,
+            'recargo_dinamico_pct' => Recargo::porcentaje(($this->recargo ?? Recargo::ninguno())->totalPb),
+            'recargo_dinamico_detalle' => ($this->recargo ?? Recargo::ninguno())->toArray(),
             'precio_base_aplicado' => $this->precioBase,
             'precio_por_km_aplicado' => $this->precioPorKm,
             'distancia_estimada_km' => $this->distanciaKm,

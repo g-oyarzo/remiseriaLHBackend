@@ -19,18 +19,27 @@ use App\ValueObjects\Coordinate;
  * responde a tiempo, se aplica la contingencia: el monto fijo de la zona
  * tarifaria más chica que cubra la distancia en línea recta y, si ninguna
  * zona la cubre, la fórmula sobre la distancia en línea recta corregida.
- * El método aplicado queda registrado en la cotización.
+ * El método aplicado queda registrado en la cotización. Sobre el monto
+ * resultante se aplica el recargo dinámico por demanda y clima.
  *
  * Todos los montos se calculan en centavos enteros.
  */
 final class CotizadorService
 {
-    public function __construct(private readonly ProveedorDistancia $mapas) {}
+    private readonly RecargoDinamico $recargos;
+
+    public function __construct(private readonly ProveedorDistancia $mapas, ?RecargoDinamico $recargos = null)
+    {
+        $this->recargos = $recargos ?? app(RecargoDinamico::class);
+    }
 
     /**
+     * $esReserva: las reservas se cotizan sin recargo dinámico (ver
+     * RecargoDinamico).
+     *
      * @throws CotizacionNoDisponible
      */
-    public function cotizar(Coordinate $origen, Coordinate $destino): Cotizacion
+    public function cotizar(Coordinate $origen, Coordinate $destino, bool $esReserva = false): Cotizacion
     {
         $distanciaLinealMetros = $origen->distanciaEnMetrosHacia($destino);
 
@@ -44,13 +53,15 @@ final class CotizadorService
 
         $tarifa = Tarifa::vigente() ?? throw CotizacionNoDisponible::sinTarifaVigente();
 
+        $recargo = $this->recargos->calcular($tarifa, $origen, $esReserva);
+
         try {
             $ruta = $this->mapas->calcularRuta($origen, $destino);
         } catch (ServicioMapasNoDisponible) {
-            return $this->cotizarPorContingencia($tarifa, $distanciaLinealMetros);
+            return $this->cotizarPorContingencia($tarifa, $distanciaLinealMetros)->conRecargo($recargo);
         }
 
-        return new Cotizacion(
+        return (new Cotizacion(
             monto: $this->aplicarFormula($tarifa, $ruta->distanciaMetros),
             distanciaKm: $ruta->distanciaKm(),
             duracionMinutos: $ruta->duracionMinutos(),
@@ -59,7 +70,7 @@ final class CotizadorService
             precioBase: (string) $tarifa->precio_base,
             precioPorKm: (string) $tarifa->precio_por_km,
             proveedorMapas: $ruta->proveedor,
-        );
+        ))->conRecargo($recargo);
     }
 
     /**

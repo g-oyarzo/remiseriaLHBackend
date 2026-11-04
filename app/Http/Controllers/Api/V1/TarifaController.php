@@ -185,6 +185,18 @@ class TarifaController extends Controller
         $tarifa = DB::transaction(function () use ($validated, $administradorId): Tarifa {
             $ahora = now();
 
+            // Los parámetros de recargo dinámico que no se envían se
+            // conservan de la versión vigente (no se resetean a 0).
+            $anterior = Tarifa::query()->where('activa', true)->lockForUpdate()->latest('vigente_desde')->first();
+            $recargo = [];
+            foreach (['demanda_umbral_ratio', 'demanda_recargo_pct', 'lluvia_umbral_mm', 'lluvia_recargo_pct', 'recargo_maximo_pct'] as $campo) {
+                if (array_key_exists($campo, $validated)) {
+                    $recargo[$campo] = $validated[$campo];
+                } elseif ($anterior !== null) {
+                    $recargo[$campo] = $anterior->getRawOriginal($campo);
+                }
+            }
+
             Tarifa::query()
                 ->where('activa', true)
                 ->lockForUpdate()
@@ -200,7 +212,7 @@ class TarifaController extends Controller
                 'activa' => true,
                 'vigente_desde' => $ahora,
                 'creada_por_persona_id' => $administradorId,
-            ]);
+            ] + $recargo);
         });
 
         // Tarifa::vigente() se cachea; se invalida al cambiar la versión activa.

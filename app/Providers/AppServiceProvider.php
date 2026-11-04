@@ -3,6 +3,9 @@
 namespace App\Providers;
 
 use App\Events\Contracts\DifusionEnTiempoReal;
+use App\Services\Clima\OpenMeteoProveedorClima;
+use App\Services\Clima\ProveedorClima;
+use App\Services\Clima\SinProveedorClima;
 use App\Services\Mapas\GoogleRoutesProveedorDistancia;
 use App\Services\Mapas\OsrmProveedorDistancia;
 use App\Services\Mapas\ProveedorDistancia;
@@ -21,6 +24,10 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
+        $this->app->bind(ProveedorClima::class, fn (): ProveedorClima => config('services.clima.driver') === 'openmeteo'
+            ? new OpenMeteoProveedorClima(config('services.clima.openmeteo.url'), config('services.clima.openmeteo.api_key'))
+            : new SinProveedorClima);
+
         // Una configuración incompleta no debe dejar sin cotizaciones a la
         // operación: se registra el error y se usa la contingencia por zonas.
         $this->app->bind(ProveedorDistancia::class, function (): ProveedorDistancia {

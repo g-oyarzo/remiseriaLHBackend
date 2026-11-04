@@ -33,7 +33,7 @@ final class RegistroViajeService
      */
     public function registrar(DatosSolicitud $datos): Viaje
     {
-        $cotizacion = $this->cotizador->cotizar($datos->origen, $datos->destino);
+        $cotizacion = $this->cotizador->cotizar($datos->origen, $datos->destino, esReserva: $datos->fechaReserva !== null);
 
         // Si el cliente envió el monto que aceptó, debe coincidir al centavo
         // con la cotización vigente; si no, se le devuelve la nueva.

@@ -48,6 +48,7 @@
         <env name="UBICACION_CACHE_STORE" value="array" force="true"/>
         <!-- Los tests nunca deben llamar a un servicio de mapas real. -->
         <env name="MAPAS_DRIVER" value="ninguno" force="true"/>
+        <env name="CLIMA_DRIVER" value="ninguno" force="true"/>
         <env name="QUEUE_CONNECTION" value="sync"/>
         <env name="SESSION_DRIVER" value="array"/>
         <env name="PULSE_ENABLED" value="false"/>

@@ -92,6 +92,18 @@ class ComprobanteTest extends TestCase
         $this->assertStringNotContainsString('MP-987654321', $pdf);
     }
 
+    public function test_el_comprobante_detalla_el_recargo_dinamico(): void
+    {
+        $this->viaje->update(['costo' => '3250.00', 'monto_base_cotizado' => '3000.00', 'recargo_dinamico_pct' => '8.33']);
+        $this->pagar();
+
+        $pdf = $this->actingAs($this->cliente)->get("/api/v1/viajes/{$this->viaje->id}/comprobante")->assertOk()->getContent();
+
+        // Los paréntesis se escapan en los strings del PDF.
+        $this->assertStringContainsString(mb_convert_encoding('Recargo dinámico \\(8.33 %\\)', 'Windows-1252', 'UTF-8'), $pdf);
+        $this->assertStringContainsString('$ 250,00', $pdf);
+    }
+
     public function test_el_comprobante_no_incluye_dni_ni_telefono(): void
     {
         $this->pagar();
