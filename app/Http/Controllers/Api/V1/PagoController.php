@@ -10,11 +10,14 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\RegistrarPagoRequest;
 use App\Models\Pago;
 use App\Models\Viaje;
+use App\OpenApi\Schemas\CobroMercadoPagoSchema;
 use App\OpenApi\Schemas\ErrorResponse;
 use App\OpenApi\Schemas\PaginationMeta;
 use App\OpenApi\Schemas\PagoSchema;
 use App\OpenApi\Schemas\RegistrarPagoRequest as RegistrarPagoRequestSchema;
 use App\OpenApi\Schemas\ValidationErrorResponse;
+use App\Services\Pagos\MercadoPago\CobrosMercadoPago;
+use App\Services\Pagos\MercadoPago\MercadoPagoNoDisponible;
 use App\Services\Pagos\PagoRechazado;
 use App\Services\Pagos\RegistroDePagos;
 use Illuminate\Http\JsonResponse;
@@ -33,7 +36,7 @@ class PagoController extends Controller
     #[OA\Post(
         path: '/conductor/viajes/{viaje}/pago',
         summary: 'Registrar el pago de un viaje finalizado',
-        description: 'Conductor asignado o administrador. El monto debe coincidir exactamente con el importe calculado por el backend al finalizar (costo_final). Efectivo queda "confirmado" (registro interno del cobro). QR y tarjetas quedan "pendiente" con su referencia_externa hasta que un administrador los concilia: el backend no tiene integración con un proveedor de pagos y no los da por cobrados. Reenviar el mismo pago devuelve 200 con el pago existente (idempotente).',
+        description: 'Conductor asignado o administrador. El monto debe coincidir exactamente con el importe del viaje (costo_final = precio cerrado cotizado). Efectivo queda "confirmado" (registro interno del cobro). QR y tarjetas cobrados fuera de Mercado Pago quedan "pendiente" con su referencia_externa hasta que un administrador los concilia. Para cobrar con Mercado Pago usar POST /viajes/{viaje}/pago/mercadopago (se confirma solo). Un cobro de Mercado Pago pendiente puede reemplazarse con este endpoint (p. ej. el pasajero pagó en efectivo). Reenviar el mismo pago devuelve 200 con el pago existente (idempotente).',
         tags: ['Pagos'],
         security: [['bearerAuth' => []]],
         parameters: [new OA\Parameter(name: 'viaje', in: 'path', required: true, schema: new OA\Schema(type: 'integer'))],
@@ -84,6 +87,59 @@ class PagoController extends Controller
     }
 
     /**
+     * POST /api/v1/viajes/{viaje}/pago/mercadopago
+     */
+    #[OA\Post(
+        path: '/viajes/{viaje}/pago/mercadopago',
+        summary: 'Generar el cobro con Mercado Pago de un viaje finalizado',
+        description: 'Cliente del viaje, conductor asignado o administrador. Crea un pago "pendiente" por el importe exacto del viaje y un enlace de Checkout Pro (mostrarlo al pasajero como link o QR). Mercado Pago confirma el cobro automáticamente por webhook (el backend verifica el pago con la API del proveedor); el cambio se difunde como "pago.actualizado" en el canal privado viaje.{id}. Si ya hay un enlace vigente se devuelve el mismo (200); si venció, se genera otro (201).',
+        tags: ['Pagos'],
+        security: [['bearerAuth' => []]],
+        parameters: [new OA\Parameter(name: 'viaje', in: 'path', required: true, schema: new OA\Schema(type: 'integer'))],
+        responses: [
+            new OA\Response(response: 201, description: 'Enlace de pago generado.', content: new OA\JsonContent(properties: [new OA\Property(property: 'data', ref: CobroMercadoPagoSchema::class)])),
+            new OA\Response(response: 200, description: 'Se reutiliza el enlace vigente.', content: new OA\JsonContent(properties: [new OA\Property(property: 'data', ref: CobroMercadoPagoSchema::class)])),
+            new OA\Response(response: 403, description: 'No tiene acceso a este viaje.', content: new OA\JsonContent(ref: ErrorResponse::class)),
+            new OA\Response(response: 404, description: 'Viaje inexistente.', content: new OA\JsonContent(ref: ErrorResponse::class)),
+            new OA\Response(response: 409, description: 'El viaje no está finalizado, ya está cobrado o tiene otro cobro pendiente de conciliación.', content: new OA\JsonContent(ref: ErrorResponse::class)),
+            new OA\Response(response: 503, description: 'Mercado Pago no está habilitado o no respondió; reintentar.', content: new OA\JsonContent(ref: ErrorResponse::class)),
+        ],
+    )]
+    public function mercadoPago(Request $request, Viaje $viaje, CobrosMercadoPago $cobros): JsonResponse
+    {
+        $this->authorize('ver', $viaje);
+
+        try {
+            [$pago, $nuevo] = $cobros->iniciarCobro($viaje->id, $request->user()->persona_id);
+        } catch (PagoRechazado $e) {
+            return response()->json(['message' => $e->getMessage()] + $e->datos, $e->status);
+        } catch (MercadoPagoNoDisponible) {
+            return response()->json([
+                'message' => 'No se pudo generar el cobro con Mercado Pago. Reintentá en unos minutos o cobrá por otro medio.',
+            ], Response::HTTP_SERVICE_UNAVAILABLE);
+        }
+
+        if ($pago->preferencia_id === null) {
+            // El pago cambió (p. ej. se registró en efectivo) mientras se
+            // creaba la preferencia: no se ofrece el enlace.
+            return response()->json(['message' => 'El cobro del viaje cambió; consultá su estado.'], Response::HTTP_CONFLICT);
+        }
+
+        return response()->json([
+            'message' => $nuevo ? 'Enlace de pago generado.' : 'El enlace de pago sigue vigente.',
+            'data' => [
+                'pago_id' => $pago->id,
+                'viaje_id' => $pago->viaje_id,
+                'monto' => (string) $pago->monto,
+                'moneda' => 'ARS',
+                'estado' => $pago->estado->value,
+                'enlace_pago' => $pago->enlace_pago,
+                'vigente_hasta' => $pago->preferencia_expira_en?->toIso8601String(),
+            ],
+        ], $nuevo ? Response::HTTP_CREATED : Response::HTTP_OK);
+    }
+
+    /**
      * GET /api/v1/admin/pagos
      */
     #[OA\Get(
@@ -124,7 +180,7 @@ class PagoController extends Controller
     #[OA\Patch(
         path: '/admin/pagos/{pago}/conciliar',
         summary: 'Conciliar un cobro digital pendiente',
-        description: 'El administrador verificó la operación con el proveedor (billetera, terminal o banco) y la confirma o la rechaza (p. ej. fondos insuficientes, CU 07 excepción 3.a). Un pago rechazado puede volver a registrarse.',
+        description: 'El administrador verificó la operación con el proveedor (billetera, terminal o banco) y la confirma o la rechaza (p. ej. fondos insuficientes, CU 07 excepción 3.a). Un pago rechazado puede volver a registrarse. Los cobros de Mercado Pago no se concilian a mano (409): se confirman al verificarlos con la API del proveedor.',
         tags: ['Pagos'],
         security: [['bearerAuth' => []]],
         parameters: [new OA\Parameter(name: 'pago', in: 'path', required: true, schema: new OA\Schema(type: 'integer'))],
@@ -135,7 +191,7 @@ class PagoController extends Controller
         responses: [
             new OA\Response(response: 200, description: 'Pago conciliado.', content: new OA\JsonContent(properties: [new OA\Property(property: 'data', ref: PagoSchema::class)])),
             new OA\Response(response: 403, description: 'La cuenta autenticada no tiene rol "administrador".', content: new OA\JsonContent(ref: ErrorResponse::class)),
-            new OA\Response(response: 409, description: 'El pago no está pendiente.', content: new OA\JsonContent(ref: ErrorResponse::class)),
+            new OA\Response(response: 409, description: 'El pago no está pendiente, o es un cobro de Mercado Pago.', content: new OA\JsonContent(ref: ErrorResponse::class)),
             new OA\Response(response: 422, description: 'Error de validación.', content: new OA\JsonContent(ref: ValidationErrorResponse::class)),
         ],
     )]

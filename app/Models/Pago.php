@@ -6,6 +6,7 @@ namespace App\Models;
 
 use App\Enums\EstadoPago;
 use App\Enums\MetodoPago;
+use App\Events\PagoActualizado;
 use App\Events\PagoConfirmado;
 use Database\Factories\PagoFactory;
 use Illuminate\Database\Eloquent\Builder;
@@ -22,13 +23,21 @@ class Pago extends Model
     protected $table = 'pagos';
 
     /**
-     * Cada vez que un pago pasa a "confirmado", por cualquier vía, se
-     * emite PagoConfirmado (después del commit) para emitir el comprobante.
+     * Cada vez que un pago se crea o cambia de estado se difunde
+     * PagoActualizado en el canal del viaje; si pasa a "confirmado", por
+     * cualquier vía, se emite además PagoConfirmado (después del commit)
+     * para emitir el comprobante.
      */
     protected static function booted(): void
     {
         static::saved(function (self $pago): void {
-            if ($pago->estado === EstadoPago::Confirmado && ($pago->wasRecentlyCreated || $pago->wasChanged('estado'))) {
+            if (! $pago->wasRecentlyCreated && ! $pago->wasChanged('estado')) {
+                return;
+            }
+
+            PagoActualizado::dispatch($pago->viaje_id, $pago->id, $pago->estado);
+
+            if ($pago->estado === EstadoPago::Confirmado) {
                 PagoConfirmado::dispatch($pago->id);
             }
         });
@@ -40,6 +49,10 @@ class Pago extends Model
         'metodo_pago',
         'monto',
         'referencia_externa',
+        'proveedor',
+        'preferencia_id',
+        'enlace_pago',
+        'preferencia_expira_en',
         'estado',
         'registrado_por_persona_id',
         'conciliado_por_persona_id',
@@ -60,6 +73,7 @@ class Pago extends Model
             'monto' => 'decimal:2',
             'fecha_pago' => 'datetime',
             'conciliado_en' => 'datetime',
+            'preferencia_expira_en' => 'datetime',
             'historial' => 'array',
         ];
     }

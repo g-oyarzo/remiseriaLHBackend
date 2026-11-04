@@ -47,6 +47,7 @@ class ReporteController extends Controller
                     new OA\Property(property: 'facturacion', type: 'string', example: '4521300.50'),
                     new OA\Property(property: 'pagos_confirmados', type: 'integer', example: 1280),
                     new OA\Property(property: 'cobros_pendientes', type: 'string', example: '15300.00'),
+                    new OA\Property(property: 'reintegros', type: 'string', example: '0.00', description: 'Cobros devueltos por el proveedor (reintegro o contracargo); no suman a la facturación.'),
                     new OA\Property(property: 'ticket_promedio', type: 'string', nullable: true, example: '3532.27'),
                     new OA\Property(property: 'distancia_total_km', type: 'number', format: 'float', example: 7120.5),
                 ]),

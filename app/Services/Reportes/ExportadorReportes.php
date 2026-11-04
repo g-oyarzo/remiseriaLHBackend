@@ -81,6 +81,7 @@ final class ExportadorReportes
             ['Viajes cancelados', $e['viajes_cancelados']],
             ['Facturación (pagos confirmados)', $e['facturacion']],
             ['Cobros pendientes de conciliación', $e['cobros_pendientes']],
+            ['Reintegros', $e['reintegros']],
             ['Ticket promedio', $e['ticket_promedio'] ?? '-'],
             ['Distancia total (km)', $e['distancia_total_km']],
         ];

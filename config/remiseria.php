@@ -230,6 +230,7 @@ return [
         'viajes' => (int) env('RATE_LIMIT_VIAJES', 10),
         'pagos' => (int) env('RATE_LIMIT_PAGOS', 20),
         'reportes' => (int) env('RATE_LIMIT_REPORTES', 10),
+        'webhooks' => (int) env('RATE_LIMIT_WEBHOOKS', 300),
     ],
 
 ];

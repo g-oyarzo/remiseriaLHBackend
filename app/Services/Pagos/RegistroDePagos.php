@@ -9,6 +9,7 @@ use App\Enums\EstadoViaje;
 use App\Enums\MetodoPago;
 use App\Models\Pago;
 use App\Models\Viaje;
+use App\Services\Pagos\MercadoPago\CobrosMercadoPago;
 use App\Support\Dinero;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
@@ -22,14 +23,20 @@ use Symfony\Component\HttpFoundation\Response;
  *   (costo_final); nunca se acepta un monto distinto enviado por el cliente.
  * - Efectivo: el conductor declara haber recibido el dinero; es un registro
  *   interno y queda confirmado.
- * - QR y tarjetas: no hay integración con un proveedor de pagos, así que el
- *   backend no puede verificar el cobro. El pago queda "pendiente" con la
+ * - QR y tarjetas registrados a mano (fuera de Mercado Pago): el backend no
+ *   puede verificar el cobro. El pago queda "pendiente" con la
  *   referencia de la operación hasta que un administrador lo concilia
  *   contra el proveedor (confirmado o rechazado). Nunca se marca como
  *   exitoso un cobro digital no verificado.
  * - Un viaje tiene un único pago (unique en la base). Reenviar el mismo
  *   pago es idempotente; uno distinto se rechaza. Si un cobro digital se
  *   rechazó, puede volver a registrarse (queda la traza en el historial).
+ * - Un cobro de Mercado Pago todavía pendiente puede reemplazarse por un
+ *   registro manual (p. ej. el pasajero terminó pagando en efectivo). Si
+ *   después Mercado Pago aprueba ese cobro, no se aplica: queda en el
+ *   historial y en un log crítico para reintegrarlo (CobrosMercadoPago).
+ * - Los cobros de Mercado Pago no se concilian a mano: los confirma el
+ *   webhook o el comando pagos:conciliar-mercadopago tras consultar la API.
  */
 final class RegistroDePagos
 {
@@ -72,7 +79,11 @@ final class RegistroDePagos
 
                 $existente = Pago::query()->where('viaje_id', $viaje->id)->lockForUpdate()->first();
 
-                if ($existente !== null && $existente->estado !== EstadoPago::Rechazado) {
+                $reemplazaMercadoPago = $existente !== null
+                    && $existente->estado === EstadoPago::Pendiente
+                    && $existente->proveedor === CobrosMercadoPago::PROVEEDOR;
+
+                if ($existente !== null && $existente->estado !== EstadoPago::Rechazado && ! $reemplazaMercadoPago) {
                     if ($this->esElMismoPago($existente, $metodo, $importe, $referencia)) {
                         return [$existente, false];
                     }
@@ -92,8 +103,16 @@ final class RegistroDePagos
                     'registrado_por_persona_id' => $registradoPor,
                     'conciliado_por_persona_id' => null,
                     'conciliado_en' => null,
+                    'proveedor' => null,
+                    'preferencia_id' => null,
+                    'enlace_pago' => null,
+                    'preferencia_expira_en' => null,
                 ]);
-                $pago->registrarEnHistorial($existente !== null ? 'reintento' : 'registro', $registradoPor);
+                $pago->registrarEnHistorial(match (true) {
+                    $reemplazaMercadoPago => 'reemplazo_de_cobro_mercadopago',
+                    $existente !== null => 'reintento',
+                    default => 'registro',
+                }, $registradoPor);
                 $pago->save();
 
                 return [$pago, true];
@@ -119,6 +138,10 @@ final class RegistroDePagos
 
             if ($pago->estado !== EstadoPago::Pendiente) {
                 throw new PagoRechazado('Solo se pueden conciliar pagos pendientes.');
+            }
+
+            if ($pago->proveedor === CobrosMercadoPago::PROVEEDOR) {
+                throw new PagoRechazado('Los cobros de Mercado Pago se confirman automáticamente al verificarlos con el proveedor.');
             }
 
             $pago->fill([

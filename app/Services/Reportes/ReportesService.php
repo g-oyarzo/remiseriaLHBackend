@@ -44,6 +44,7 @@ final class ReportesService
 
         $confirmados = $pagos->get(EstadoPago::Confirmado->value);
         $pendientes = $pagos->get(EstadoPago::Pendiente->value);
+        $reintegrados = $pagos->get(EstadoPago::Reintegrado->value);
         // SUM() sobre DECIMAL(10,2) devuelve un decimal exacto como string.
         $facturacionCentavos = $confirmados ? Dinero::aCentavos((string) $confirmados->total) : 0;
         $pagosConfirmados = (int) ($confirmados->cantidad ?? 0);
@@ -63,6 +64,8 @@ final class ReportesService
             'facturacion' => Dinero::desdeCentavos($facturacionCentavos),
             'pagos_confirmados' => $pagosConfirmados,
             'cobros_pendientes' => Dinero::desdeCentavos($pendientes ? Dinero::aCentavos((string) $pendientes->total) : 0),
+            // Cobros devueltos por el proveedor (reintegro o contracargo): no suman a la facturación.
+            'reintegros' => Dinero::desdeCentavos($reintegrados ? Dinero::aCentavos((string) $reintegrados->total) : 0),
             'ticket_promedio' => $pagosConfirmados > 0
                 ? Dinero::desdeCentavos(intdiv($facturacionCentavos + intdiv($pagosConfirmados, 2), $pagosConfirmados))
                 : null,
