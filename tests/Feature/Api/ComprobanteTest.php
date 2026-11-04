@@ -74,12 +74,13 @@ class ComprobanteTest extends TestCase
 
     public function test_el_cliente_descarga_el_comprobante_en_pdf(): void
     {
-        $this->pagar();
+        $pago = $this->pagar();
+        $numero = sprintf('%08d', $pago->id);
 
         $respuesta = $this->actingAs($this->cliente)->get("/api/v1/viajes/{$this->viaje->id}/comprobante")
             ->assertOk()
             ->assertHeader('Content-Type', 'application/pdf')
-            ->assertHeader('Content-Disposition', "attachment; filename=\"comprobante-viaje-{$this->viaje->id}.pdf\"");
+            ->assertHeader('Content-Disposition', "attachment; filename=\"comprobante-{$numero}-viaje-{$this->viaje->id}.pdf\"");
 
         $pdf = $respuesta->getContent();
         $this->assertStringStartsWith('%PDF-1.4', $pdf);

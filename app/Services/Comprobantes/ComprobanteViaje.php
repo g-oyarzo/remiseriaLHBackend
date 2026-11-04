@@ -10,6 +10,7 @@ use App\Models\Viaje;
 use App\Services\Cotizacion\CotizadorService;
 use App\Support\Dinero;
 use App\Support\Pdf\DocumentoPdf;
+use Carbon\CarbonInterface;
 
 /**
  * Comprobante PDF de un viaje pagado (CU 07 paso 4, CU 17).
@@ -24,7 +25,7 @@ use App\Support\Pdf\DocumentoPdf;
  */
 final class ComprobanteViaje
 {
-    public function generar(Viaje $viaje): string
+    public function generar(Viaje $viaje, ?CarbonInterface $emitidoEn = null): string
     {
         $viaje->loadMissing(['cliente.persona', 'conductor.persona', 'vehiculo.marca', 'pago']);
         /** @var Pago $pago */
@@ -36,7 +37,7 @@ final class ComprobanteViaje
             ->texto('Comprobante interno del servicio. No válido como factura.', tamano: 8)
             ->espacio(6)
             ->par('Comprobante N°', sprintf('%08d', $pago->id))
-            ->par('Emitido', now()->format('d/m/Y H:i'))
+            ->par('Emitido', ($emitidoEn ?? now())->format('d/m/Y H:i'))
             ->par('Estado del pago', ucfirst($pago->estado->label()))
             ->separador();
 
