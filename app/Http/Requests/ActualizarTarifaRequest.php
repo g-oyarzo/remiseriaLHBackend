@@ -22,6 +22,15 @@ class ActualizarTarifaRequest extends FormRequest
             'precio_base' => Dinero::reglasMontoPositivo(),
             'precio_por_km' => Dinero::reglasMontoPositivo(),
             'zona' => ['nullable', 'string', 'max:60'],
+            // Recargo dinámico (opcional; si se omite se conserva el valor
+            // de la versión vigente). Porcentajes de 0 a 300 con hasta dos
+            // decimales; demanda_umbral_ratio null desactiva el recargo por
+            // demanda.
+            'demanda_umbral_ratio' => ['sometimes', 'nullable', 'numeric', 'gt:0', 'max:999.99', 'decimal:0,2'],
+            'demanda_recargo_pct' => ['sometimes', 'numeric', 'min:0', 'max:300', 'decimal:0,2'],
+            'lluvia_umbral_mm' => ['sometimes', 'numeric', 'min:0', 'max:999.99', 'decimal:0,2'],
+            'lluvia_recargo_pct' => ['sometimes', 'numeric', 'min:0', 'max:300', 'decimal:0,2'],
+            'recargo_maximo_pct' => ['sometimes', 'numeric', 'min:0', 'max:300', 'decimal:0,2'],
         ];
     }
 

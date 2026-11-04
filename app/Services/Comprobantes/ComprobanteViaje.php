@@ -60,6 +60,13 @@ final class ComprobanteViaje
             $pdf->par($concepto, $importe);
         }
 
+        $recargo = $viaje->monto_base_cotizado !== null && $viaje->costo !== null
+            ? Dinero::aCentavos((string) $viaje->costo) - Dinero::aCentavos((string) $viaje->monto_base_cotizado)
+            : 0;
+        if ($recargo > 0) {
+            $pdf->par("Recargo dinámico ({$viaje->recargo_dinamico_pct} %)", '$ '.$this->pesos(Dinero::desdeCentavos($recargo)));
+        }
+
         $pdf->separador()
             ->par('Total', '$ '.$this->pesos((string) $pago->monto), tamano: 12)
             ->par('Método de pago', $pago->metodo_pago->label())

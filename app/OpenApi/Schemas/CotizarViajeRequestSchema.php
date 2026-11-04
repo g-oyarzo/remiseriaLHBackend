@@ -15,6 +15,7 @@ use OpenApi\Attributes as OA;
         new OA\Property(property: 'origen_lng', type: 'number', format: 'float', minimum: -180, maximum: 180, example: -57.9544),
         new OA\Property(property: 'destino_lat', type: 'number', format: 'float', minimum: -90, maximum: 90, example: -34.9055),
         new OA\Property(property: 'destino_lng', type: 'number', format: 'float', minimum: -180, maximum: 180, example: -57.9325),
+        new OA\Property(property: 'reserva', type: 'boolean', default: false, description: 'true para cotizar una reserva (sin recargo dinámico).'),
     ],
 )]
 final class CotizarViajeRequestSchema {}

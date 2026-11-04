@@ -24,6 +24,11 @@ class Tarifa extends Model
     protected $fillable = [
         'precio_base',
         'precio_por_km',
+        'demanda_umbral_ratio',
+        'demanda_recargo_pct',
+        'lluvia_umbral_mm',
+        'lluvia_recargo_pct',
+        'recargo_maximo_pct',
         'zona',
         'activa',
         'vigente_desde',
@@ -39,6 +44,11 @@ class Tarifa extends Model
         return [
             'precio_base' => 'decimal:2',
             'precio_por_km' => 'decimal:2',
+            'demanda_umbral_ratio' => 'decimal:2',
+            'demanda_recargo_pct' => 'decimal:2',
+            'lluvia_umbral_mm' => 'decimal:2',
+            'lluvia_recargo_pct' => 'decimal:2',
+            'recargo_maximo_pct' => 'decimal:2',
             'activa' => 'boolean',
             'vigente_desde' => 'datetime',
             'vigente_hasta' => 'datetime',

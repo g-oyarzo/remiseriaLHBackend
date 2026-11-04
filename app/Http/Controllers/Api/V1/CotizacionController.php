@@ -38,8 +38,10 @@ class CotizacionController extends Controller
     )]
     public function cotizar(CotizarViajeRequest $request, CotizadorService $cotizador): JsonResponse
     {
+        $request->validate(['reserva' => ['sometimes', 'boolean']]);
+
         try {
-            $cotizacion = $cotizador->cotizar($request->origen(), $request->destino());
+            $cotizacion = $cotizador->cotizar($request->origen(), $request->destino(), esReserva: $request->boolean('reserva'));
         } catch (CotizacionNoDisponible $e) {
             return self::respuestaCotizacionNoDisponible($e);
         }
