@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Services\Comprobantes;
 
+use App\Enums\MetodoCotizacion;
 use App\Models\Pago;
 use App\Models\Viaje;
 use App\Services\Cotizacion\CotizadorService;
@@ -14,7 +15,7 @@ use App\Support\Pdf\DocumentoPdf;
  * Comprobante PDF de un viaje pagado (CU 07 paso 4, CU 17).
  *
  * Usa los datos históricos guardados en el viaje y en el pago (tarifa
- * aplicada, distancia, importe), no la tarifa vigente. Del cliente y del
+ * aplicada, distancia cotizada, importe), no la tarifa vigente. Del cliente y del
  * conductor muestra solo nombre y apellido: el comprobante puede circular,
  * así que no incluye DNI, teléfono ni domicilio. La referencia de la
  * operación se muestra parcialmente enmascarada.
@@ -69,41 +70,34 @@ final class ComprobanteViaje
     }
 
     /**
+     * Desglose de la cotización con la que se cobró el viaje (precio cerrado).
+     *
      * @return list<array{0: string, 1: string}>
      */
     private function desglose(Viaje $viaje, Pago $pago): array
     {
-        if ($viaje->costo_final_origen === 'zona') {
+        if ($viaje->metodo_cotizacion === MetodoCotizacion::Zona || $viaje->costo_final_origen === 'zona') {
             return [['Tarifa fija por zona', '$ '.$this->pesos((string) $pago->monto)]];
         }
 
         $base = $viaje->precio_base_aplicado;
         $porKm = $viaje->precio_por_km_aplicado;
 
-        if ($base === null || $porKm === null) {
+        if ($base === null || $porKm === null || $viaje->distancia_estimada_km === null) {
             return [['Importe del viaje', '$ '.$this->pesos((string) $pago->monto)]];
         }
 
-        $metros = $viaje->costo_final_origen === 'recorrido'
-            ? $viaje->distancia_recorrida_metros
-            : (int) round(((float) $viaje->distancia_estimada_km) * 1000);
-
+        $metros = (int) round(((float) $viaje->distancia_estimada_km) * 1000);
         $porDistancia = Dinero::aCentavos(CotizadorService::montoParaDistancia((string) $base, (string) $porKm, $metros))
             - Dinero::aCentavos((string) $base);
 
-        $lineas = [
+        return [
             ['Tarifa base', '$ '.$this->pesos((string) $base)],
             [
-                sprintf('Distancia (%s km x $ %s)', number_format($metros / 1000, 2, ',', '.'), $this->pesos((string) $porKm)),
+                sprintf('Distancia cotizada (%s km x $ %s)', number_format($metros / 1000, 2, ',', '.'), $this->pesos((string) $porKm)),
                 '$ '.$this->pesos(Dinero::desdeCentavos($porDistancia)),
             ],
         ];
-
-        if ($viaje->costo_final_origen === 'estimado') {
-            $lineas[] = ['Nota', 'Se cobró el importe cotizado (distancia estimada).'];
-        }
-
-        return $lineas;
     }
 
     /**

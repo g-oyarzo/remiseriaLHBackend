@@ -51,11 +51,12 @@ class ComprobanteTest extends TestCase
             'destino_numero' => '1200',
             'precio_base_aplicado' => '1500.00',
             'precio_por_km_aplicado' => '350.00',
-            'distancia_recorrida_metros' => 5000,
+            'distancia_recorrida_metros' => 5600,
+            'distancia_estimada_km' => 5.0,
             'distancia_final_km' => 5.0,
             'duracion_final_min' => 14,
             'costo_final' => '3250.00',
-            'costo_final_origen' => 'recorrido',
+            'costo_final_origen' => 'cotizado',
         ]);
     }
 

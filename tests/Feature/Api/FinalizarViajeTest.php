@@ -79,7 +79,7 @@ class FinalizarViajeTest extends TestCase
         return $this->actingAs($this->conductor)->postJson("/api/v1/conductor/viajes/{$viaje->id}/finalizar", $datos);
     }
 
-    public function test_finaliza_dentro_del_radio_y_calcula_el_cierre_con_el_recorrido(): void
+    public function test_finaliza_dentro_del_radio_y_cobra_lo_cotizado(): void
     {
         $this->freezeSecond();
         $viaje = $this->viajeEnCurso();
@@ -87,9 +87,10 @@ class FinalizarViajeTest extends TestCase
         $this->finalizar($viaje, $this->aMetrosDelDestino(40))
             ->assertOk()
             ->assertJsonPath('data.estado', 'finalizado')
-            // 1500 + 5 km * 350 = 3250
-            ->assertJsonPath('data.costo_final', '3250.00')
-            ->assertJsonPath('data.costo_final_origen', 'recorrido')
+            // Precio cerrado: se cobra lo cotizado (3000), no la fórmula sobre
+            // los 5 km recorridos (que daría 3250).
+            ->assertJsonPath('data.costo_final', '3000.00')
+            ->assertJsonPath('data.costo_final_origen', 'cotizado')
             ->assertJsonPath('data.duracion_final_min', 12);
 
         $viaje->refresh();
@@ -143,25 +144,25 @@ class FinalizarViajeTest extends TestCase
         $this->assertSame(EstadoViaje::EnCurso, $viaje->fresh()->estado);
     }
 
-    public function test_con_seguimiento_insuficiente_se_cobra_lo_cotizado(): void
+    public function test_con_seguimiento_insuficiente_la_distancia_final_es_la_estimada(): void
     {
         $viaje = $this->viajeEnCurso(['puntos_seguimiento' => 1, 'distancia_recorrida_metros' => 300]);
 
         $this->finalizar($viaje, $this->aMetrosDelDestino(10))
             ->assertOk()
             ->assertJsonPath('data.costo_final', '3000.00')
-            ->assertJsonPath('data.costo_final_origen', 'estimado')
+            ->assertJsonPath('data.costo_final_origen', 'cotizado')
             ->assertJsonPath('data.distancia_final_km', 4.2);
     }
 
-    public function test_un_viaje_cotizado_por_zona_respeta_el_monto_fijo(): void
+    public function test_un_viaje_cotizado_por_zona_cobra_el_monto_fijo(): void
     {
         $viaje = $this->viajeEnCurso(['metodo_cotizacion' => MetodoCotizacion::Zona, 'costo' => '2800.00']);
 
         $this->finalizar($viaje, $this->aMetrosDelDestino(10))
             ->assertOk()
             ->assertJsonPath('data.costo_final', '2800.00')
-            ->assertJsonPath('data.costo_final_origen', 'zona');
+            ->assertJsonPath('data.costo_final_origen', 'cotizado');
     }
 
     public function test_un_cambio_de_tarifa_durante_el_viaje_no_altera_el_precio_final(): void
@@ -170,7 +171,7 @@ class FinalizarViajeTest extends TestCase
         Tarifa::olvidarVigenteEnCache();
         $viaje = $this->viajeEnCurso();
 
-        $this->finalizar($viaje, $this->aMetrosDelDestino(10))->assertJsonPath('data.costo_final', '3250.00');
+        $this->finalizar($viaje, $this->aMetrosDelDestino(10))->assertJsonPath('data.costo_final', '3000.00');
     }
 
     public function test_no_se_puede_finalizar_dos_veces(): void
