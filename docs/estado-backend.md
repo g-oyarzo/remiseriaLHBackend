@@ -25,7 +25,7 @@ Relevamiento hecho sobre `develop` (`6eccd2d`) y trabajo de la rama `feature/bac
 | GET `/admin/reportes/estadisticas` | Pendiente | Completa | `ReporteTest` |
 | GET `/admin/reportes/exportar` | Pendiente | Completa (PDF y XLSX) | `ReporteTest`, `LibroXlsxTest` |
 | Comando de migración legacy | Pendiente | Completa (CSV); un volcado SQL requiere exportarlo antes a CSV | `ImportarLegacyCommandTest` |
-| Tests y cobertura > 80 % en dominio | Parcial (122 tests, sin medición) | 363 tests. Cobertura medida con PCOV antes de las decisiones del negocio (307 tests): `app/Services` 96,33 %, `app/` 86,23 %. **Volver a medir** tras los cambios | — |
+| Tests y cobertura > 80 % en dominio | Parcial (122 tests, sin medición) | 363 tests; **cobertura de `app/Services`: 96,39 %** (`app/` completo: 87,63 %), medida con PCOV el 2026-11-04 | — |
 
 ## Tareas de `Hecho.txt` (verificación)
 

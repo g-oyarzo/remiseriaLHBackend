@@ -52,7 +52,7 @@ docker run --rm --network container:rlh-test-mysql -v "$PWD:/app" -w /app \
   php -d pcov.enabled=1 -d pcov.directory=/app/app vendor/bin/phpunit --coverage-text
 ```
 
-Medición del 2026-10-27 (307 tests): **`app/Services` 96,33 %** de líneas; `app/` completo 86,23 %. La suite tiene hoy 363 tests (precio cerrado, recargo dinámico, cotizaciones emitidas, registro de comprobantes y Mercado Pago); hay que repetir la medición.
+Medición del 2026-11-04 (363 tests): **`app/Services` 96,39 %** de líneas; `app/Services/Pagos` 94,22 %; `app/` completo 87,63 %.
 
 ## Suites
 
