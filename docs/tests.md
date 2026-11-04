@@ -52,7 +52,7 @@ docker run --rm --network container:rlh-test-mysql -v "$PWD:/app" -w /app \
   php -d pcov.enabled=1 -d pcov.directory=/app/app vendor/bin/phpunit --coverage-text
 ```
 
-Medición del 2026-10-27 (307 tests): **`app/Services` 96,33 %** de líneas; `app/` completo 86,23 %.
+Medición del 2026-10-27 (307 tests): **`app/Services` 96,33 %** de líneas; `app/` completo 86,23 %. La suite tiene hoy 363 tests (precio cerrado, recargo dinámico, cotizaciones emitidas, registro de comprobantes y Mercado Pago); hay que repetir la medición.
 
 ## Suites
 
@@ -61,8 +61,8 @@ Medición del 2026-10-27 (307 tests): **`app/Services` 96,33 %** de líneas; `ap
 | `tests/Unit` | Dinero en centavos, generador PDF, generador XLSX. |
 | `tests/Feature/Auth` | Login, registro (anti-enumeración), roles. |
 | `tests/Feature/Seguridad` | Exposición de datos personales, permisos del chat, revocación de acceso, límites de frecuencia y paginación. |
-| `tests/Feature/Api` | Tarifas, cotización, solicitudes y reservas, registro telefónico, estados, finalización con geocerca, pagos, comprobantes, reportes, conductores y vehículos. |
-| `tests/Feature/Cotizacion` | Fórmula, redondeo, contingencia por zonas, proveedores OSRM y Google (respuestas válidas, errores, timeouts, reintentos, caché). |
+| `tests/Feature/Api` | Tarifas, cotización y cotizaciones emitidas (precio cerrado), solicitudes y reservas, registro telefónico, estados, finalización con geocerca, pagos, Mercado Pago (con `Http::fake`: firma, verificación contra la API, idempotencia, anomalías, reintegros, conciliación), comprobantes y su registro, reportes, conductores y vehículos. |
+| `tests/Feature/Cotizacion` | Fórmula, redondeo, contingencia por zonas, recargo dinámico por demanda y lluvia, proveedores OSRM y Google (respuestas válidas, errores, timeouts, reintentos, caché). |
 | `tests/Feature/Asignacion` | Selección de candidatos, ofertas, aceptar, rechazar, vencimiento, agotamiento y restricciones de la base. |
 | `tests/Feature/Geolocalizacion` | Pings, Redis con respaldo en MySQL, saltos imposibles, seguimiento del recorrido. |
 | `tests/Feature/Concurrencia` | Bloqueos de fila con dos conexiones MySQL reales (pagos, ofertas, cancelación, tarifas). |

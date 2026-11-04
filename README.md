@@ -65,11 +65,13 @@ Si Redis no está disponible, la API sigue funcionando: el último ping GPS se g
 | `QUEUE_CONNECTION` | `database` o `redis`; nunca `sync` en producción. |
 | `REVERB_APP_ID/KEY/SECRET`, `REVERB_ALLOWED_ORIGINS` | WebSockets. Credenciales propias y orígenes reales en producción. |
 | `MAPAS_DRIVER`, `MAPAS_OSRM_URL` o `GOOGLE_MAPS_API_KEY` | Servicio de ruteo del cotizador. Con `ninguno` se usa la contingencia por zonas. |
+| `MERCADOPAGO_ACCESS_TOKEN`, `MERCADOPAGO_WEBHOOK_SECRET`, `MERCADOPAGO_NOTIFICATION_URL`, `MERCADOPAGO_SANDBOX` | Cobros con Mercado Pago. Sin access token, el cobro digital por Mercado Pago queda deshabilitado (503). |
+| `CLIMA_DRIVER` (`ninguno` u `openmeteo`) | Recargo dinámico por lluvia. La API pública de Open-Meteo es solo para uso no comercial. |
 | `ADMIN_PASSWORD` | Contraseña del administrador inicial (AdminSeeder). |
 | `CORS_ALLOWED_ORIGINS`, `SANCTUM_STATEFUL_DOMAINS` | Dominios del panel web. |
 | `SANCTUM_TOKEN_EXPIRATION` | Vida de los tokens (minutos). |
 
-Las reglas operativas (tiempos de aceptación, radios, geocerca de 100 m, anticipación de reservas, límites de frecuencia, etc.) están en `config/remiseria.php` y se pueden ajustar por entorno.
+Las reglas operativas (oferta de 30 s, radio de 10 km ampliable hasta 20 km, geocerca de 100 m, reservas entre 60 minutos y 30 días, vigencia de cotizaciones, límites de frecuencia, etc.) están en `config/remiseria.php` y se pueden ajustar por entorno.
 
 ## Comandos Artisan propios
 
@@ -77,6 +79,7 @@ Las reglas operativas (tiempos de aceptación, radios, geocerca de 100 m, antici
 |---|---|
 | `viajes:despachar-programados` | Pasa a despacho las reservas que entraron en la ventana previa (scheduler, cada minuto). |
 | `viajes:supervisar-despacho` | Vence ofertas sin respuesta y reactiva búsquedas detenidas (scheduler, cada minuto). |
+| `pagos:conciliar-mercadopago [--dias=3]` | Concilia contra la API de Mercado Pago los cobros pendientes cuyo webhook se perdió (scheduler, cada 10 minutos). |
 | `legacy:importar {archivo} --tipo=clientes\|conductores [--dry-run]` | Migración de datos del sistema anterior desde CSV. Ver [docs/arquitectura-y-flujos.md](docs/arquitectura-y-flujos.md#migración-de-datos-legacy). |
 | `simular:anual {dias} {viajes_por_dia}` | Genera datos de volumen para pruebas de carga (solo entornos de prueba). |
 | `broadcast:test` | Evento de humo para verificar Reverb. |

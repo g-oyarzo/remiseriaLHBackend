@@ -16,17 +16,22 @@ Rama `feature/backend-completion-security-hardening`. Se conservaron las rutas y
 | Datos personales en viajes y chat | Se incluían DNI, teléfono, CUIL, domicilio y ubicación de la contraparte | `cliente.persona` y `conductor.persona` de la contraparte traen solo `id`, `nombre` y `apellido`; `conductor` trae `persona_id`, `calificacion` y `foto`. Admin y la propia persona siguen viendo todo | No depender de esos campos en las apps de pasajero y conductor. |
 | Validación de tarifas | Se aceptaba `0` | Montos mayores a 0 con hasta 2 decimales | Validar igual en el formulario. |
 | `DELETE /admin/vehiculos/{id}` | Respondía 500 | 405 (no existe la baja de vehículos) | No ofrecer la acción. |
+| Precio final | Recalculado con la distancia recorrida | **Siempre el precio cotizado** (`costo_final_origen = cotizado`) | Mostrar al pasajero el monto de la cotización como precio cerrado. |
+| Reservas | Anticipación mínima de 30 minutos | **60 minutos** (máximo 30 días) | Ajustar la validación del selector de fecha. |
+| Estado de pago | `pendiente`, `confirmado`, `rechazado` | Se agrega `reintegrado` (Mercado Pago devolvió el cobro) | Mostrarlo en el panel; no cuenta como cobrado. |
 
 ## Endpoints nuevos
 
 | Endpoint | Uso |
 |---|---|
-| `POST /viajes/cotizar` | Cotización previa: `monto`, `distancia_km`, `duracion_minutos`, `metodo`. |
-| `POST /cliente/viajes/solicitar`, `POST /cliente/viajes/reservar` | Reemplazan a `POST /cliente/viajes`, que se mantiene. Requieren `metodo_pago`. Con `monto_confirmado`, el backend devuelve 409 y la cotización nueva si el monto cambió. |
+| `POST /viajes/cotizar` | Cotización previa: `monto`, `monto_base`, `recargo {porcentaje, motivos, …}`, `distancia_km`, `duracion_minutos`, `metodo`, `cotizacion_id` y `vigente_hasta`. Enviar `reserva: true` al cotizar una reserva. |
+| `POST /cliente/viajes/solicitar`, `POST /cliente/viajes/reservar` | Reemplazan a `POST /cliente/viajes`, que se mantiene. Requieren `metodo_pago`. **Recomendado:** enviar el `cotizacion_id` de la cotización que vio el pasajero; si venció (5 minutos) o ya se usó, 409 y hay que volver a cotizar. Alternativa: `monto_confirmado`, que devuelve 409 con la cotización nueva si el monto cambió. |
 | `POST /admin/viajes/registrar` | Viajes telefónicos. |
 | `POST /conductor/viajes/{id}/rechazar` | Rechazar una oferta. |
 | `POST /admin/viajes/{id}/reasignar` | Reintentar una búsqueda agotada. |
-| `GET /admin/pagos`, `PATCH /admin/pagos/{id}/conciliar` | Conciliación de cobros digitales. |
+| `GET /admin/pagos`, `PATCH /admin/pagos/{id}/conciliar` | Conciliación de cobros digitales manuales. |
+| `POST /viajes/{id}/pago/mercadopago` | Cobro con Mercado Pago al finalizar: abrir `enlace_pago` o mostrarlo como QR; esperar `pago.actualizado` (o consultar el viaje). Si vence (`vigente_hasta`), volver a llamarlo. 503: ofrecer otro medio de pago. |
+| `GET /admin/comprobantes[/{id}[/descargar]]` | Registro de comprobantes (solo lectura y descarga). |
 | `GET /viajes/{id}/comprobante` | PDF (también llega `comprobante_url` en la respuesta del pago). |
 | `GET /admin/reportes/estadisticas`, `GET /admin/reportes/exportar` | Reportes. |
 | `/admin/zonas-tarifarias` | Zonas de contingencia del cotizador. |
@@ -36,13 +41,14 @@ Las rutas `aceptar`, `finalizar` y `ubicacion` aceptan ahora `POST` (contrato de
 
 ## Campos nuevos en el viaje
 
-`metodo_pago`, `canal`, `destino_localidad`/`destino_calle`/`destino_numero`, `precio_base_aplicado`, `precio_por_km_aplicado`, `distancia_estimada_km`, `duracion_estimada_min`, `metodo_cotizacion`, `despachado_en`, `busqueda_agotada_en`, `iniciado_en`, `distancia_recorrida_metros`, `finalizado_en`, `distancia_final_km`, `duracion_final_min`, `costo_final`, `costo_final_origen` y `distancia_al_destino_metros`. El estado admite el nuevo valor `reservado`.
+`metodo_pago`, `canal`, `monto_base_cotizado`, `recargo_dinamico_pct`, `recargo_dinamico_detalle`, `destino_localidad`/`destino_calle`/`destino_numero`, `precio_base_aplicado`, `precio_por_km_aplicado`, `distancia_estimada_km`, `duracion_estimada_min`, `metodo_cotizacion`, `despachado_en`, `busqueda_agotada_en`, `iniciado_en`, `distancia_recorrida_metros`, `finalizado_en`, `distancia_final_km`, `duracion_final_min`, `costo_final`, `costo_final_origen` y `distancia_al_destino_metros`. El estado admite el nuevo valor `reservado`.
 
 ## Eventos WebSocket nuevos o modificados
 
 | Evento | Canal | Payload |
 |---|---|---|
 | `viaje.estado` (nuevo) | `viaje.{id}` | `{viaje_id, estado, conductor_id}` |
+| `pago.actualizado` (nuevo) | `viaje.{id}` | `{viaje_id, pago_id, estado}`: el pago se creó o cambió de estado (por ejemplo, Mercado Pago lo confirmó). |
 | `asignacion.ofrecida` (nuevo) | `conductor.{id}` | `{asignacion_id, viaje_id, expira_en, distancia_al_origen_metros, origen, destino, origen_direccion, destino_direccion, costo_estimado, metodo_pago}` |
 | `asignacion.retirada` (nuevo) | `conductor.{id}` | `{asignacion_id, viaje_id, motivo}` (`expirada` o `cancelada`) |
 | `busqueda.agotada` (nuevo) | `admin.despacho` | `{viaje_id, motivo}` |
