@@ -17,7 +17,8 @@ Prefijo: `/api/v1`. La especificación completa (esquemas de request/response) s
 | 403 | Rol sin permiso o recurso ajeno (por ejemplo, el viaje de otro cliente). | `{"message": "..."}` |
 | 404 | Recurso inexistente. | `{"message": "..."}` |
 | 405 | Método no soportado. | `{"message": "..."}` |
-| 409 | Transición de estado inválida o conflicto de negocio (oferta vencida, pago existente, sin tarifa vigente). | `{"message": "..."}` y, en algunos casos, datos extra. |
+| 409 | Transición de estado inválida o conflicto de negocio (oferta vencida, pago existente, sin tarifa vigente, cotización vencida o ya usada). | `{"message": "..."}` y, en algunos casos, datos extra. |
+| 503 | Servicio externo no disponible (Mercado Pago). Reintentar. | `{"message": "..."}` |
 | 422 | Validación. | `{"message": "...", "errors": {"campo": ["..."]}}` |
 | 429 | Límite de frecuencia superado. | `{"message": "..."}` |
 | 500 | Error inesperado (sin detalles internos con `APP_DEBUG=false`). | `{"message": "Server Error"}` |
@@ -37,8 +38,9 @@ Todos se miden por usuario (o por IP si no hay sesión) y se configuran en `conf
 | `chat` | 30/min | Envío de mensajes. |
 | `cotizar` | 30/min | Cotizaciones. |
 | `viajes` | 10/min | Solicitar, reservar o crear viajes. |
-| `pagos` | 20/min | Registro de pagos. |
+| `pagos` | 20/min | Registro de pagos y generación de cobros con Mercado Pago. |
 | `reportes` | 10/min | Exportaciones. |
+| `webhooks` | 300/min por IP | Webhook de Mercado Pago. |
 
 ## Endpoints
 
@@ -53,18 +55,25 @@ Todos se miden por usuario (o por IP si no hay sesión) y se configuran en `conf
 | GET | `/viajes/{id}` | Detalle. Cliente dueño, conductor asignado (o con una oferta pendiente) o admin. |
 | PATCH | `/viajes/{id}/cancelar` | Cliente dueño o admin. Un viaje en curso solo lo cancela un admin. |
 | GET | `/viajes/{id}/comprobante` | PDF del comprobante (pago confirmado). Cliente, conductor asignado o admin. |
+| POST | `/viajes/{id}/pago/mercadopago` | Genera (o reutiliza) el enlace de Checkout Pro por el importe exacto de un viaje finalizado: `{pago_id, monto, moneda, estado, enlace_pago, vigente_hasta}`. Cliente dueño, conductor asignado o admin. 503 si Mercado Pago no está habilitado o no responde. |
 | GET | `/viajes/{id}/mensajes` | Historial del chat: participantes y admin. Parámetros: `limite`, `antes_de_id`. |
 | POST | `/viajes/{id}/mensajes` | Enviar un mensaje (solo cliente y conductor; con el viaje aceptado o en curso). |
 | PATCH | `/viajes/{id}/mensajes/marcar-leidos` | Marca como leídos los mensajes recibidos. |
-| POST | `/viajes/cotizar` | Cotización (solo cliente y admin). |
+| POST | `/viajes/cotizar` | Cotización con precio cerrado (solo cliente y admin): `monto`, `monto_base`, `recargo`, `cotizacion_id` y `vigente_hasta`. Con `reserva: true` se cotiza sin recargo dinámico, para reservar. |
 | POST | `/broadcasting/auth` | Autorización de canales privados de Reverb. |
+
+### Público
+
+| Método | Ruta | Descripción |
+|---|---|---|
+| POST | `/webhooks/mercadopago` | Solo para Mercado Pago. Exige la firma `x-signature` válida (401 si no). Verifica el pago contra la API del proveedor antes de confirmarlo; 503 si no pudo consultarlo, para que Mercado Pago reintente. |
 
 ### Cliente (`role:cliente`)
 
 | Método | Ruta | Descripción |
 |---|---|---|
-| POST | `/cliente/viajes/solicitar` | Viaje inmediato (CU 01). Requiere `metodo_pago`. Admite `monto_confirmado` opcional. |
-| POST | `/cliente/viajes/reservar` | Reserva (CU 09). Requiere `fecha_viaje`. |
+| POST | `/cliente/viajes/solicitar` | Viaje inmediato (CU 01). Requiere `metodo_pago`. Con `cotizacion_id` se cobra exactamente el precio cotizado (409 si venció o ya se usó; 422 si el trayecto no coincide). Alternativa: `monto_confirmado`. |
+| POST | `/cliente/viajes/reservar` | Reserva (CU 09). Requiere `fecha_viaje` entre 60 minutos y 30 días desde ahora. Admite `cotizacion_id` de una cotización hecha con `reserva: true`. |
 | POST | `/cliente/viajes` | Compatibilidad: según `tipo`, solicita o reserva (`metodo_pago` por defecto: efectivo). |
 | PATCH | `/cliente/viajes/{id}/calificar` | Calificación de 1 a 5 de un viaje finalizado (una sola vez). |
 
@@ -79,19 +88,22 @@ Todos se miden por usuario (o por IP si no hay sesión) y se configuran en `conf
 | POST (PATCH) | `/conductor/viajes/{id}/rechazar` | Rechaza la oferta; el viaje se ofrece al siguiente conductor. |
 | PATCH | `/conductor/viajes/{id}/iniciar` | Aceptado → en curso. |
 | POST (PATCH) | `/conductor/viajes/{id}/finalizar` | En curso → finalizado, con geocerca de 100 m (`lat`/`lng` opcionales). |
-| POST | `/conductor/viajes/{id}/pago` | Registra el cobro (conductor asignado o admin). |
+| POST | `/conductor/viajes/{id}/pago` | Registra un cobro manual (efectivo, o QR/tarjeta fuera de Mercado Pago). Conductor asignado o admin. Puede reemplazar un cobro de Mercado Pago todavía pendiente. |
 
 ### Administrador (`role:administrador`)
 
 | Método | Ruta | Descripción |
 |---|---|---|
-| GET/PUT | `/admin/tarifas` | Tarifa vigente / nueva versión de la tarifa. `POST` se mantiene por compatibilidad. |
+| GET/PUT | `/admin/tarifas` | Tarifa vigente / nueva versión de la tarifa, incluidos los parámetros del recargo dinámico (`demanda_umbral_ratio`, `demanda_recargo_pct`, `lluvia_umbral_mm`, `lluvia_recargo_pct`, `recargo_maximo_pct`; si se omiten, se conservan los de la versión anterior). `POST` se mantiene por compatibilidad. |
 | GET | `/admin/tarifas/historial` | Versiones de la tarifa. |
 | GET/POST/PUT/DELETE | `/admin/zonas-tarifarias[/{id}]` | Zonas de contingencia del cotizador (DELETE = desactivar). |
 | POST | `/admin/viajes/registrar` | Viaje telefónico (CU 10), con `cliente_id` o `cliente{dni,nombre,apellido,telefono}`. |
 | POST | `/admin/viajes/{id}/reasignar` | Reinicia una búsqueda de conductor agotada. |
 | GET | `/admin/pagos?estado=pendiente` | Pagos para conciliar. |
-| PATCH | `/admin/pagos/{id}/conciliar` | `estado`: `confirmado` o `rechazado`, más `observacion`. |
+| PATCH | `/admin/pagos/{id}/conciliar` | `estado`: `confirmado` o `rechazado`, más `observacion`. No aplica a cobros de Mercado Pago (409). |
+| GET | `/admin/comprobantes` | Registro de comprobantes emitidos (solo lectura). Filtros: `fecha_desde`, `fecha_hasta`, `numero`, `viaje_id`, `metodo_pago`. |
+| GET | `/admin/comprobantes/{id}` | Detalle de un comprobante. |
+| GET | `/admin/comprobantes/{id}/descargar` | PDF, verificado contra su SHA-256 (409 si no coincide). |
 | GET | `/admin/reportes/estadisticas` | CU 15. Filtros: `fecha_desde`, `fecha_hasta`, `conductor_dni`, `estado`. |
 | GET | `/admin/reportes/exportar?formato=pdf\|excel` | CU 16, con los mismos filtros. |
 | CRUD | `/admin/conductores` | Alta, modificación, baja lógica y listado (CU 12-14). |
@@ -112,7 +124,7 @@ Todos se miden por usuario (o por IP si no hay sesión) y se configuran en `conf
 | `POST /api/v1/conductor/ubicacion` | Igual (también acepta PATCH). |
 | Chat "GET /chat" y "POST /chat" | `GET`/`POST /viajes/{id}/mensajes` (ruta existente, ya usada por los frontends). |
 | `POST /api/v1/conductor/viajes/{id}/pago` | Igual. |
-| Comprobante PDF | `GET /viajes/{id}/comprobante` y `comprobante_url` en la respuesta del pago. |
+| Comprobante PDF | `GET /viajes/{id}/comprobante`, `comprobante_url` en la respuesta del pago y registro `/admin/comprobantes`. |
 | `GET /api/v1/admin/reportes/estadisticas`, `/exportar` | Igual. |
 | `UbicacionActualizadaEvent` | `App\Events\UbicacionConductorActualizada`, difundido como `ubicacion.actualizada`. |
 
@@ -122,7 +134,7 @@ Todos los canales son privados (`private-…`) y se autorizan con `POST /api/v1/
 
 | Canal | Quién puede escuchar | Eventos |
 |---|---|---|
-| `viaje.{id}` | Cliente del viaje, conductor asignado y admin | `viaje.estado` (`{viaje_id, estado, conductor_id}`), `mensaje.nuevo`, `ubicacion.actualizada` |
+| `viaje.{id}` | Cliente del viaje, conductor asignado y admin | `viaje.estado` (`{viaje_id, estado, conductor_id}`), `pago.actualizado` (`{viaje_id, pago_id, estado}`), `mensaje.nuevo`, `ubicacion.actualizada` |
 | `conductor.{id}` | El propio conductor, el admin y el cliente con un viaje activo con ese conductor | `asignacion.ofrecida`, `asignacion.retirada`, `ubicacion.actualizada` |
 | `admin.despacho` | Administradores | `busqueda.agotada`, `ubicacion.actualizada` (mapa de flota) |
 
