@@ -6,11 +6,13 @@ namespace App\Models;
 
 use App\Enums\EstadoPago;
 use App\Enums\MetodoPago;
+use App\Events\PagoConfirmado;
 use Database\Factories\PagoFactory;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class Pago extends Model
 {
@@ -18,6 +20,19 @@ class Pago extends Model
     use HasFactory;
 
     protected $table = 'pagos';
+
+    /**
+     * Cada vez que un pago pasa a "confirmado", por cualquier vía, se
+     * emite PagoConfirmado (después del commit) para emitir el comprobante.
+     */
+    protected static function booted(): void
+    {
+        static::saved(function (self $pago): void {
+            if ($pago->estado === EstadoPago::Confirmado && ($pago->wasRecentlyCreated || $pago->wasChanged('estado'))) {
+                PagoConfirmado::dispatch($pago->id);
+            }
+        });
+    }
 
     /** @var list<string> */
     protected $fillable = [
@@ -52,6 +67,11 @@ class Pago extends Model
     public function viaje(): BelongsTo
     {
         return $this->belongsTo(Viaje::class);
+    }
+
+    public function comprobante(): HasOne
+    {
+        return $this->hasOne(Comprobante::class);
     }
 
     /**

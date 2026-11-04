@@ -8,6 +8,7 @@ use App\Http\Controllers\Api\V1\CotizacionController;
 use App\Http\Controllers\Api\V1\MarcaController;
 use App\Http\Controllers\Api\V1\MensajeController;
 use App\Http\Controllers\Api\V1\PagoController;
+use App\Http\Controllers\Api\V1\RegistroComprobantesController;
 use App\Http\Controllers\Api\V1\ReporteController;
 use App\Http\Controllers\Api\V1\SolicitudViajeController;
 use App\Http\Controllers\Api\V1\TarifaController;
@@ -117,6 +118,12 @@ Route::middleware(['auth:sanctum', 'role:administrador'])->prefix('admin')->grou
 
     Route::get('/pagos', [PagoController::class, 'index']);
     Route::patch('/pagos/{pago}/conciliar', [PagoController::class, 'conciliar']);
+
+    // Registro de comprobantes: solo lectura y descarga (sin rutas de
+    // modificación ni borrado).
+    Route::get('/comprobantes', [RegistroComprobantesController::class, 'index']);
+    Route::get('/comprobantes/{comprobante}', [RegistroComprobantesController::class, 'show']);
+    Route::get('/comprobantes/{comprobante}/descargar', [RegistroComprobantesController::class, 'descargar']);
 
     Route::get('/reportes/estadisticas', [ReporteController::class, 'estadisticas']);
     Route::get('/reportes/exportar', [ReporteController::class, 'exportar'])->middleware('throttle:reportes');
