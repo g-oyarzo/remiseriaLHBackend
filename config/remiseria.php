@@ -177,6 +177,8 @@ return [
     'cotizacion' => [
         'distancia_minima_metros' => (float) env('COTIZACION_DISTANCIA_MINIMA_METROS', 50),
         'distancia_maxima_km' => (float) env('COTIZACION_DISTANCIA_MAXIMA_KM', 300),
+        // Vigencia del precio cerrado devuelto por POST /viajes/cotizar.
+        'vigencia_minutos' => (int) env('COTIZACION_VIGENCIA_MINUTOS', 5),
     ],
 
     /*

@@ -11,6 +11,8 @@ use OpenApi\Attributes as OA;
     schema: 'Cotizacion',
     type: 'object',
     properties: [
+        new OA\Property(property: 'cotizacion_id', type: 'string', format: 'uuid', description: 'Usar al solicitar o reservar para cobrar exactamente este monto.'),
+        new OA\Property(property: 'vigente_hasta', type: 'string', format: 'date-time'),
         new OA\Property(property: 'monto', type: 'string', example: '4317.50', description: 'Precio cerrado a cobrar, en pesos, con dos decimales (incluye el recargo dinámico).'),
         new OA\Property(property: 'monto_base', type: 'string', example: '3925.00', description: 'Monto antes del recargo dinámico.'),
         new OA\Property(property: 'recargo', type: 'object', description: 'Recargo dinámico aplicado.', properties: [

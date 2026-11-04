@@ -10,6 +10,7 @@ use App\OpenApi\Schemas\CotizacionSchema;
 use App\OpenApi\Schemas\CotizarViajeRequestSchema;
 use App\OpenApi\Schemas\ErrorResponse;
 use App\OpenApi\Schemas\ValidationErrorResponse;
+use App\Services\Cotizacion\CotizacionesEmitidas;
 use App\Services\Cotizacion\CotizacionNoDisponible;
 use App\Services\Cotizacion\CotizadorService;
 use Illuminate\Http\JsonResponse;
@@ -24,7 +25,7 @@ class CotizacionController extends Controller
     #[OA\Post(
         path: '/viajes/cotizar',
         summary: 'Cotizar un viaje',
-        description: 'Calcula el costo estimado (tarifa base + distancia * precio por km) con la distancia de manejo del servicio de mapas. Si el servicio falla o no responde a tiempo, aplica la contingencia por zonas (metodo = "zona" o "estimacion_lineal"). Disponible para clientes y administradores.',
+        description: 'Precio cerrado: devuelve cotizacion_id, vigente hasta vigente_hasta; al solicitar o reservar con ese id se cobra exactamente este monto. Calcula el costo (tarifa base + distancia * precio por km, más el recargo dinámico) con la distancia de manejo del servicio de mapas. Si el servicio falla o no responde a tiempo, aplica la contingencia por zonas (metodo = "zona" o "estimacion_lineal"). Disponible para clientes y administradores.',
         tags: ['Viajes'],
         security: [['bearerAuth' => []]],
         requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(ref: CotizarViajeRequestSchema::class)),
@@ -36,7 +37,7 @@ class CotizacionController extends Controller
             new OA\Response(response: 429, description: 'Demasiadas cotizaciones en poco tiempo.', content: new OA\JsonContent(ref: ErrorResponse::class)),
         ],
     )]
-    public function cotizar(CotizarViajeRequest $request, CotizadorService $cotizador): JsonResponse
+    public function cotizar(CotizarViajeRequest $request, CotizadorService $cotizador, CotizacionesEmitidas $cotizaciones): JsonResponse
     {
         $request->validate(['reserva' => ['sometimes', 'boolean']]);
 
@@ -46,7 +47,12 @@ class CotizacionController extends Controller
             return self::respuestaCotizacionNoDisponible($e);
         }
 
-        return response()->json(['data' => $cotizacion->toArray()]);
+        $emitida = $cotizaciones->emitir($request->user()->id, $request->origen(), $request->destino(), $request->boolean('reserva'), $cotizacion);
+
+        return response()->json(['data' => [
+            'cotizacion_id' => $emitida->id,
+            'vigente_hasta' => $emitida->expira_en->toIso8601String(),
+        ] + $cotizacion->toArray()]);
     }
 
     /**

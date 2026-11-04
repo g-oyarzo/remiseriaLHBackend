@@ -15,6 +15,7 @@ use App\OpenApi\Schemas\SolicitarViajeRequestSchema;
 use App\OpenApi\Schemas\ValidationErrorResponse;
 use App\OpenApi\Schemas\ViajeSchema;
 use App\Services\Cotizacion\CotizacionNoDisponible;
+use App\Services\Cotizacion\CotizacionNoUtilizable;
 use App\Services\Viajes\ClienteTelefonicoService;
 use App\Services\Viajes\CotizacionDesactualizada;
 use App\Services\Viajes\DatosSolicitud;
@@ -124,6 +125,11 @@ class SolicitudViajeController extends Controller
             $viaje = $this->registro->registrar($datos);
         } catch (CotizacionNoDisponible $e) {
             return CotizacionController::respuestaCotizacionNoDisponible($e);
+        } catch (CotizacionNoUtilizable $e) {
+            return response()->json([
+                'message' => $e->getMessage(),
+                'errors' => ['cotizacion_id' => [$e->getMessage()]],
+            ], $e->status);
         } catch (CotizacionDesactualizada $e) {
             return response()->json([
                 'message' => $e->getMessage(),

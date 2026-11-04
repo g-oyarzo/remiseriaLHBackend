@@ -37,3 +37,9 @@ Schedule::command('viajes:supervisar-despacho')
     ->everyMinute()
     ->withoutOverlapping()
     ->onOneServer();
+
+// Elimina las cotizaciones emitidas vencidas hace más de una semana
+// (App\Models\CotizacionEmitida::prunable()).
+Schedule::command('model:prune', ['--model' => [App\Models\CotizacionEmitida::class]])
+    ->daily()
+    ->onOneServer();
