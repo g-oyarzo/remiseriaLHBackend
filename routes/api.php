@@ -7,6 +7,7 @@ use App\Http\Controllers\Api\V1\ConductorController;
 use App\Http\Controllers\Api\V1\CotizacionController;
 use App\Http\Controllers\Api\V1\MarcaController;
 use App\Http\Controllers\Api\V1\MensajeController;
+use App\Http\Controllers\Api\V1\MercadoPagoWebhookController;
 use App\Http\Controllers\Api\V1\PagoController;
 use App\Http\Controllers\Api\V1\RegistroComprobantesController;
 use App\Http\Controllers\Api\V1\ReporteController;
@@ -33,6 +34,10 @@ Route::middleware('throttle:6,1')->group(function () {
     Route::post('/auth/register', [AuthController::class, 'register']);
 });
 
+// Webhook de Mercado Pago: público, autenticado por la firma x-signature
+// (ver MercadoPagoWebhookController).
+Route::post('/webhooks/mercadopago', MercadoPagoWebhookController::class)->middleware('throttle:webhooks');
+
 // Rutas Autenticadas (cualquier rol)
 Route::middleware('auth:sanctum')->group(function () {
     Route::post('/auth/logout', [AuthController::class, 'logout']);
@@ -47,6 +52,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/viajes/{viaje}', [ViajeController::class, 'show']);
     Route::patch('/viajes/{viaje}/cancelar', [ViajeController::class, 'cancelar']);
     Route::get('/viajes/{viaje}/comprobante', [ComprobanteController::class, 'show']);
+    Route::post('/viajes/{viaje}/pago/mercadopago', [PagoController::class, 'mercadoPago'])->middleware('throttle:pagos');
     
     // Mensajes
     Route::get('/viajes/{viaje}/mensajes', [MensajeController::class, 'index']);

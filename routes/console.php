@@ -38,6 +38,14 @@ Schedule::command('viajes:supervisar-despacho')
     ->withoutOverlapping()
     ->onOneServer();
 
+// Concilia contra la API de Mercado Pago los cobros pendientes cuyo webhook
+// se haya perdido (App\Console\Commands\ConciliarMercadoPagoCommand). Sin
+// MERCADOPAGO_ACCESS_TOKEN no hace nada.
+Schedule::command('pagos:conciliar-mercadopago')
+    ->everyTenMinutes()
+    ->withoutOverlapping()
+    ->onOneServer();
+
 // Elimina las cotizaciones emitidas vencidas hace más de una semana
 // (App\Models\CotizacionEmitida::prunable()).
 Schedule::command('model:prune', ['--model' => [App\Models\CotizacionEmitida::class]])

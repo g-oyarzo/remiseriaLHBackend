@@ -36,6 +36,26 @@ return [
     ],
 
     /*
+    | Mercado Pago (Checkout Pro + webhooks) para cobros digitales.
+    |
+    | - access_token: credencial privada de la aplicación (TEST-... en
+    |   sandbox, APP_USR-... en producción).
+    | - webhook_secret: clave secreta de Webhooks (Tus integraciones >
+    |   Webhooks) para validar la firma x-signature.
+    | - notification_url: URL pública HTTPS de POST /api/v1/webhooks/mercadopago.
+    | - sandbox: usar sandbox_init_point en lugar de init_point.
+    */
+    'mercadopago' => [
+        'access_token' => env('MERCADOPAGO_ACCESS_TOKEN'),
+        'webhook_secret' => env('MERCADOPAGO_WEBHOOK_SECRET'),
+        'notification_url' => env('MERCADOPAGO_NOTIFICATION_URL'),
+        'base_url' => env('MERCADOPAGO_BASE_URL', 'https://api.mercadopago.com'),
+        'sandbox' => (bool) env('MERCADOPAGO_SANDBOX', true),
+        'timeout_segundos' => (float) env('MERCADOPAGO_TIMEOUT_SEGUNDOS', 10),
+        'preferencia_vigencia_minutos' => (int) env('MERCADOPAGO_PREFERENCIA_VIGENCIA_MINUTOS', 30),
+    ],
+
+    /*
     | Servicio de clima para el recargo dinámico por lluvia.
     |
     | driver: "openmeteo" o "ninguno" (por defecto: sin recargo por clima).
