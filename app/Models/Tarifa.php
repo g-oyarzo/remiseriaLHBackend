@@ -93,11 +93,26 @@ class Tarifa extends Model
         // leer.
         $version = (int) Cache::get(self::CACHE_KEY_VIGENTE.':version', 0);
 
-        return Cache::remember(
-            self::CACHE_KEY_VIGENTE.':v'.$version,
-            now()->addMinutes(10),
-            fn () => self::query()->activas()->latest('vigente_desde')->latest('id')->first(),
-        );
+        // Se guardan los atributos (un array), no el modelo: la cache no
+        // deserializa objetos (cache.serializable_classes = false, protección
+        // contra cadenas de deserialización si se filtra APP_KEY). Guardar el
+        // modelo devolvía __PHP_Incomplete_Class con Redis o la base de datos.
+        // Clave ":datos:" distinta de la del formato anterior (":v{n}", que
+        // guardaba el modelo serializado): tras desplegar, las entradas
+        // viejas que siguen en Redis se ignoran en lugar de leerse como
+        // "sin tarifa vigente".
+        $clave = self::CACHE_KEY_VIGENTE.':datos:v'.$version;
+        $consultar = fn (): ?array => self::query()->activas()->latest('vigente_desde')->latest('id')->first()?->getAttributes();
+
+        $atributos = Cache::remember($clave, now()->addMinutes(10), $consultar);
+
+        if ($atributos !== null && ! is_array($atributos)) {
+            // Valor ilegible en la cache: se descarta y se consulta la base.
+            Cache::forget($clave);
+            $atributos = $consultar();
+        }
+
+        return is_array($atributos) ? (new self)->newFromBuilder($atributos) : null;
     }
 
     /**
