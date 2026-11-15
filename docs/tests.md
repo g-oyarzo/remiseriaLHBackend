@@ -62,13 +62,15 @@ Medición del 2026-11-04 (363 tests): **`app/Services` 96,39 %** de líneas; `ap
 | `tests/Feature/Auth` | Login, registro (anti-enumeración), roles. |
 | `tests/Feature/Seguridad` | Exposición de datos personales, permisos del chat, revocación de acceso, límites de frecuencia y paginación. |
 | `tests/Feature/Api` | Tarifas, cotización y cotizaciones emitidas (precio cerrado), solicitudes y reservas, registro telefónico, estados, finalización con geocerca, pagos, Mercado Pago (con `Http::fake`: firma, verificación contra la API, idempotencia, anomalías, reintegros, conciliación), comprobantes y su registro, reportes, conductores y vehículos. |
-| `tests/Feature/Cotizacion` | Fórmula, redondeo, contingencia por zonas, recargo dinámico por demanda y lluvia, proveedores OSRM y Google (respuestas válidas, errores, timeouts, reintentos, caché). |
+| `tests/Feature/Cotizacion` | Fórmula, redondeo, contingencia por zonas, recargo dinámico por demanda y lluvia, proveedores OSRM, Google y openrouteservice (respuestas válidas, errores, timeouts, reintentos, caché), cuota local, circuit breaker con recuperación y rechazo de trayectos sin recorrido por calles. |
 | `tests/Feature/Asignacion` | Selección de candidatos, ofertas, aceptar, rechazar, vencimiento, agotamiento y restricciones de la base. |
 | `tests/Feature/Geolocalizacion` | Pings, Redis con respaldo en MySQL, saltos imposibles, seguimiento del recorrido. |
 | `tests/Feature/Concurrencia` | Bloqueos de fila con dos conexiones MySQL reales (pagos, ofertas, cancelación, tarifas). |
-| `tests/Feature/Console` | Despacho de reservas, importación legacy. |
+| `tests/Feature/Console` | Despacho de reservas, importación legacy, `mapas:estado`, `carga:preparar`. |
 | `tests/Feature/Broadcasting` | Autorización de canales y eventos. |
-| `tests/Feature/Database` | Tablas esenciales y orden de ejes de las coordenadas. |
+| `tests/Feature/Database` | Tablas esenciales, orden de ejes de las coordenadas y caché serializada (regresión: objetos en caché con `serializable_classes=false`). |
+
+`tests/Feature/Api/MercadoPagoTarjetasYSeguridadTest.php` cubre la ventana temporal y las repeticiones del webhook, el reintegro de cobros no aplicados, las tarjetas guardadas (vincular, consentimiento, límite, predeterminada, desvincular, IDOR), el pago con tarjeta guardada (aprobado, rechazado, token inválido, cobro simultáneo, vencimiento del enlace), el cobro automático por órdenes y la conciliación de órdenes. **Todas las respuestas de Mercado Pago son simuladas** (`Http::fake`): validan la lógica del backend, no la integración real (ver la validación en sandbox en [seguridad-y-despliegue.md](seguridad-y-despliegue.md#validación-de-mercado-pago-en-sandbox)).
 
 ## Consejos
 

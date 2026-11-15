@@ -23,7 +23,8 @@ use Laravel\Reverb\ApplicationManager;
 use Tests\TestCase;
 
 /**
- * Regresiones de la auditoría final de seguridad (INFORME_AUDITORIA_SEGURIDAD_BACKEND.md).
+ * Regresiones de la auditoría final de seguridad (hallazgos SEC-01 a SEC-16;
+ * ver docs/seguridad-y-despliegue.md).
  */
 class AuditoriaFinalTest extends TestCase
 {

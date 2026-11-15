@@ -61,12 +61,13 @@ Todos se miden por usuario (o por IP si no hay sesión) y se configuran en `conf
 | PATCH | `/viajes/{id}/mensajes/marcar-leidos` | Marca como leídos los mensajes recibidos. |
 | POST | `/viajes/cotizar` | Cotización con precio cerrado (solo cliente y admin): `monto`, `monto_base`, `recargo`, `cotizacion_id` y `vigente_hasta`. Con `reserva: true` se cotiza sin recargo dinámico, para reservar. |
 | POST | `/broadcasting/auth` | Autorización de canales privados de Reverb. |
+| GET | `/pagos/mercadopago/configuracion` | Clave pública de Mercado Pago (para tokenizar tarjetas) y funciones habilitadas: `{habilitado, public_key, tarjetas_guardadas, pagos_automaticos, consentimiento_version}`. |
 
 ### Público
 
 | Método | Ruta | Descripción |
 |---|---|---|
-| POST | `/webhooks/mercadopago` | Solo para Mercado Pago. Exige la firma `x-signature` válida (401 si no). Verifica el pago contra la API del proveedor antes de confirmarlo; 503 si no pudo consultarlo, para que Mercado Pago reintente. |
+| POST | `/webhooks/mercadopago` | Solo para Mercado Pago. Exige la firma `x-signature` válida y un `ts` dentro de la ventana permitida (401 si no). Temas `payment` y `order`. Verifica la operación contra la API del proveedor antes de confirmarla; 503 si no pudo consultarla, para que Mercado Pago reintente. Las notificaciones repetidas se ignoran. |
 
 ### Cliente (`role:cliente`)
 
@@ -76,6 +77,11 @@ Todos se miden por usuario (o por IP si no hay sesión) y se configuran en `conf
 | POST | `/cliente/viajes/reservar` | Reserva (CU 09). Requiere `fecha_viaje` entre 60 minutos y 30 días desde ahora. Admite `cotizacion_id` de una cotización hecha con `reserva: true`. |
 | POST | `/cliente/viajes` | Compatibilidad: según `tipo`, solicita o reserva (`metodo_pago` por defecto: efectivo). |
 | PATCH | `/cliente/viajes/{id}/calificar` | Calificación de 1 a 5 de un viaje finalizado (una sola vez). |
+| GET | `/cliente/medios-pago` | Tarjetas guardadas activas (predeterminada primero): `id`, `card_id`, `marca`, `tipo`, `ultimos_cuatro`, vencimiento, `predeterminado`, `cobro_automatico`. |
+| POST | `/cliente/medios-pago` | Vincula una tarjeta **tokenizada** en el dispositivo: `token`, `payment_method_id`, `tipo`, `acepto_guardar_tarjeta` (obligatorio), `predeterminado`, `cobro_automatico` y `autorizo_cobro_automatico`. 409 si ya está vinculada; 422 si Mercado Pago no la valida, por el límite de tarjetas o si los cobros automáticos no están habilitados. |
+| PATCH | `/cliente/medios-pago/{id}/predeterminado` | Elige la tarjeta predeterminada (404 si es ajena). |
+| DELETE | `/cliente/medios-pago/{id}` | Desvincula: deja de usarse en el momento y se borra en Mercado Pago en segundo plano. |
+| POST | `/cliente/viajes/{id}/pago/tarjeta` | Paga un viaje finalizado con una tarjeta guardada: `medio_pago_id` y un `token` nuevo generado con `card_id` + CVV. Responde el pago con `mp_status` y `mp_status_detail`. 409 si hay otro cobro en curso o ya está pagado; 422 si el token es rechazado. |
 
 ### Conductor (`role:conductor`)
 
@@ -101,6 +107,7 @@ Todos se miden por usuario (o por IP si no hay sesión) y se configuran en `conf
 | POST | `/admin/viajes/{id}/reasignar` | Reinicia una búsqueda de conductor agotada. |
 | GET | `/admin/pagos?estado=pendiente` | Pagos para conciliar. |
 | PATCH | `/admin/pagos/{id}/conciliar` | `estado`: `confirmado` o `rechazado`, más `observacion`. No aplica a cobros de Mercado Pago (409). |
+| POST | `/admin/pagos/{id}/reintegrar` | `mp_operacion_id`: reintegra en Mercado Pago un cobro aprobado que **no** se aplicó (pago doble o tardío). Idempotente; 202. Nunca la operación que confirmó el pago (409). |
 | GET | `/admin/comprobantes` | Registro de comprobantes emitidos (solo lectura). Filtros: `fecha_desde`, `fecha_hasta`, `numero`, `viaje_id`, `metodo_pago`. |
 | GET | `/admin/comprobantes/{id}` | Detalle de un comprobante. |
 | GET | `/admin/comprobantes/{id}/descargar` | PDF, verificado contra su SHA-256 (409 si no coincide). |
@@ -135,7 +142,11 @@ Todos los canales son privados (`private-…`) y se autorizan con `POST /api/v1/
 | Canal | Quién puede escuchar | Eventos |
 |---|---|---|
 | `viaje.{id}` | Cliente del viaje, conductor asignado y admin | `viaje.estado` (`{viaje_id, estado, conductor_id}`), `pago.actualizado` (`{viaje_id, pago_id, estado}`), `mensaje.nuevo`, `ubicacion.actualizada` |
-| `conductor.{id}` | El propio conductor, el admin y el cliente con un viaje activo con ese conductor | `asignacion.ofrecida`, `asignacion.retirada`, `ubicacion.actualizada` |
+| `conductor.{id}` | El propio conductor y el admin (el pasajero **no**: recibe la ubicación por `viaje.{id}`) | `asignacion.ofrecida`, `asignacion.retirada`, `ubicacion.actualizada` |
 | `admin.despacho` | Administradores | `busqueda.agotada`, `ubicacion.actualizada` (mapa de flota) |
 
+`ubicacion.actualizada` informa `registrado_en` en ISO 8601 con milisegundos.
+
 Los eventos se emiten después de confirmar la transacción. Si Reverb no está disponible, la operación de negocio no falla: los clientes deben resincronizar por REST al reconectarse.
+
+Los eventos de cliente (`client-*`) de Reverb están deshabilitados: los frontends no pueden enviar mensajes por el WebSocket, solo recibirlos.
