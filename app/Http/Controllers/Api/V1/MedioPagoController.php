@@ -15,6 +15,7 @@ use App\Services\Pagos\MercadoPago\MercadoPagoNoDisponible;
 use App\Services\Pagos\PagoRechazado;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\RateLimiter;
 use OpenApi\Attributes as OA;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -93,6 +94,20 @@ class MedioPagoController extends Controller
     )]
     public function store(VincularMedioPagoRequest $request): JsonResponse
     {
+        // Seguridad (SEC-06): cada intento (exitoso o no) cuenta. Sin este
+        // límite, el endpoint permitía probar tarjetas robadas en serie
+        // ("card testing") a razón de 20 por minuto.
+        $clave = 'vincular-tarjeta:'.$request->user()->id;
+        $maximo = max(1, (int) config('remiseria.abuso.vincular_tarjetas_por_hora'));
+
+        if (RateLimiter::tooManyAttempts($clave, $maximo)) {
+            return response()->json([
+                'message' => 'Alcanzaste el límite de intentos para vincular tarjetas. Probá de nuevo más tarde.',
+            ], Response::HTTP_TOO_MANY_REQUESTS, ['Retry-After' => (string) RateLimiter::availableIn($clave)]);
+        }
+
+        RateLimiter::hit($clave, 3600);
+
         try {
             $medio = $this->medios->vincular($request->user(), $request->datos(), $request->ip());
         } catch (PagoRechazado $e) {

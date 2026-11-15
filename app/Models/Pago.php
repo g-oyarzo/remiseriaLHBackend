@@ -90,6 +90,33 @@ class Pago extends Model
     }
 
     /**
+     * Vista del pago para el pasajero y el conductor (SEC-03). Excluye el
+     * historial de auditoría (personas que registraron o conciliaron,
+     * identificadores y detalles de Mercado Pago), la observación del
+     * administrador y los identificadores internos de preferencia y orden.
+     * La vista completa (toArray) es solo para administradores.
+     *
+     * @return array<string, mixed>
+     */
+    public function vistaPublica(): array
+    {
+        return [
+            'id' => $this->id,
+            'viaje_id' => $this->viaje_id,
+            'metodo_pago' => $this->metodo_pago?->value,
+            'monto' => $this->monto !== null ? (string) $this->monto : null,
+            'estado' => $this->estado?->value,
+            'referencia_externa' => $this->referencia_externa,
+            'proveedor' => $this->proveedor,
+            'enlace_pago' => $this->enlace_pago,
+            'preferencia_expira_en' => $this->preferencia_expira_en?->toIso8601String(),
+            'fecha_pago' => $this->fecha_pago?->toIso8601String(),
+            'created_at' => $this->created_at?->toIso8601String(),
+            'updated_at' => $this->updated_at?->toIso8601String(),
+        ];
+    }
+
+    /**
      * Agrega una entrada al historial de transiciones del pago.
      */
     public function registrarEnHistorial(string $accion, ?int $personaId, array $extra = []): void

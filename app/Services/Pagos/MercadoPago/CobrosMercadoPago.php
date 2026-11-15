@@ -220,14 +220,16 @@ final class CobrosMercadoPago
             return 'no_aplica';
         }
 
-        $existente = Pago::query()->where('viaje_id', $viajeId)->first();
-
-        if ($existente !== null && collect($existente->historial ?? [])->contains('accion', 'inicio_cobro_automatico')) {
-            return 'ya_intentado';
-        }
-
         try {
             return $this->conCandado($viajeId, function () use ($viaje, $medio): string {
+                // Dentro del candado (SEC-15): dos jobs simultáneos no pueden
+                // pasar ambos este control.
+                $existente = Pago::query()->where('viaje_id', $viaje->id)->first();
+
+                if ($existente !== null && collect($existente->historial ?? [])->contains('accion', 'inicio_cobro_automatico')) {
+                    return 'ya_intentado';
+                }
+
                 $pago = $this->reservar($viaje->id, (int) $viaje->cliente_id, self::metodoDeTarjeta($medio->tipo), 'automatico', ['medio_pago_id' => $medio->id]);
 
                 $orden = $this->cliente->crearOrden($this->datosOrdenAutomatica($pago, $medio), 'cobro-automatico-pago-'.$pago->id);
