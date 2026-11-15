@@ -246,6 +246,10 @@ return [
     |
     */
 
+    // Documentación OpenAPI accesible (SEC-08). Por defecto, solo fuera de
+    // producción.
+    'documentacion_api_publica' => (bool) env('API_DOCS_PUBLICA', env('APP_ENV', 'production') !== 'production'),
+
     'abuso' => [
         'login_intentos_por_cuenta' => (int) env('LOGIN_INTENTOS_POR_CUENTA', 10),
         'login_bloqueo_segundos' => (int) env('LOGIN_BLOQUEO_SEGUNDOS', 900),
