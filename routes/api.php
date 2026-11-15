@@ -6,6 +6,7 @@ use App\Http\Controllers\Api\V1\ComprobanteController;
 use App\Http\Controllers\Api\V1\ConductorController;
 use App\Http\Controllers\Api\V1\CotizacionController;
 use App\Http\Controllers\Api\V1\MarcaController;
+use App\Http\Controllers\Api\V1\MedioPagoController;
 use App\Http\Controllers\Api\V1\MensajeController;
 use App\Http\Controllers\Api\V1\MercadoPagoWebhookController;
 use App\Http\Controllers\Api\V1\PagoController;
@@ -46,14 +47,15 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::get('/marcas', [MarcaController::class, 'index']);
     Route::get('/tarifas/vigente', [TarifaController::class, 'vigente']);
-    
+
     // Viajes (comunes)
     Route::get('/viajes', [ViajeController::class, 'index']);
     Route::get('/viajes/{viaje}', [ViajeController::class, 'show']);
     Route::patch('/viajes/{viaje}/cancelar', [ViajeController::class, 'cancelar']);
     Route::get('/viajes/{viaje}/comprobante', [ComprobanteController::class, 'show']);
     Route::post('/viajes/{viaje}/pago/mercadopago', [PagoController::class, 'mercadoPago'])->middleware('throttle:pagos');
-    
+    Route::get('/pagos/mercadopago/configuracion', [MedioPagoController::class, 'configuracion']);
+
     // Mensajes
     Route::get('/viajes/{viaje}/mensajes', [MensajeController::class, 'index']);
     Route::post('/viajes/{viaje}/mensajes', [MensajeController::class, 'store'])->middleware('throttle:chat');
@@ -72,6 +74,13 @@ Route::middleware(['auth:sanctum', 'role:cliente'])->prefix('cliente')->group(fu
     Route::post('/viajes/solicitar', [SolicitudViajeController::class, 'solicitar'])->middleware('throttle:viajes');
     Route::post('/viajes/reservar', [SolicitudViajeController::class, 'reservar'])->middleware('throttle:viajes');
     Route::patch('/viajes/{viaje}/calificar', [ViajeController::class, 'calificar']);
+
+    // Tarjetas guardadas (Mercado Pago) y pago con tarjeta guardada.
+    Route::get('/medios-pago', [MedioPagoController::class, 'index']);
+    Route::post('/medios-pago', [MedioPagoController::class, 'store'])->middleware('throttle:pagos');
+    Route::patch('/medios-pago/{medio}/predeterminado', [MedioPagoController::class, 'predeterminado'])->whereNumber('medio');
+    Route::delete('/medios-pago/{medio}', [MedioPagoController::class, 'destroy'])->whereNumber('medio');
+    Route::post('/viajes/{viaje}/pago/tarjeta', [PagoController::class, 'tarjeta'])->middleware('throttle:pagos');
 });
 
 // Rutas Conductor
@@ -124,6 +133,7 @@ Route::middleware(['auth:sanctum', 'role:administrador'])->prefix('admin')->grou
 
     Route::get('/pagos', [PagoController::class, 'index']);
     Route::patch('/pagos/{pago}/conciliar', [PagoController::class, 'conciliar']);
+    Route::post('/pagos/{pago}/reintegrar', [PagoController::class, 'reintegrar'])->middleware('throttle:pagos');
 
     // Registro de comprobantes: solo lectura y descarga (sin rutas de
     // modificación ni borrado).
@@ -133,7 +143,7 @@ Route::middleware(['auth:sanctum', 'role:administrador'])->prefix('admin')->grou
 
     Route::get('/reportes/estadisticas', [ReporteController::class, 'estadisticas']);
     Route::get('/reportes/exportar', [ReporteController::class, 'exportar'])->middleware('throttle:reportes');
-    
+
     Route::get('/tarifas', [TarifaController::class, 'index']);
     Route::put('/tarifas', [TarifaController::class, 'actualizar']);
     Route::post('/tarifas', [TarifaController::class, 'store']);

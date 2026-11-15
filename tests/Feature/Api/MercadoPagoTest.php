@@ -293,6 +293,7 @@ class MercadoPagoTest extends TestCase
     public function test_un_pago_aprobado_para_un_viaje_ya_cobrado_en_efectivo_no_se_aplica(): void
     {
         $pago = $this->pagoPendiente();
+        Http::fake([self::API.'/checkout/preferences/*' => Http::response(['id' => 'pref-1'])]);
 
         // El pasajero terminó pagando en efectivo: reemplaza el cobro de MP.
         $this->actingAs($this->conductor)
@@ -301,6 +302,13 @@ class MercadoPagoTest extends TestCase
         $pago->refresh();
         $this->assertNull($pago->proveedor);
         $this->assertSame('reemplazo_de_cobro_mercadopago', collect($pago->historial)->last()['accion']);
+        $this->assertSame('pref-1', collect($pago->historial)->last()['preferencia_vencida']);
+
+        // El enlace reemplazado se vence en Mercado Pago (fecha de fin en el pasado).
+        Http::assertSent(fn (SolicitudHttp $s): bool => $s->method() === 'PUT'
+            && $s->url() === self::API.'/checkout/preferences/pref-1'
+            && $s['expires'] === true
+            && now()->isAfter($s['expiration_date_to']));
 
         // Luego Mercado Pago aprueba el enlace viejo: se registra para reintegrar.
         $this->fakePago($this->datosPago($pago));
@@ -409,7 +417,8 @@ class MercadoPagoTest extends TestCase
 
     private function webhook(string $dataId, ?string $firma = null, string $tipo = 'payment'): TestResponse
     {
-        $requestId = 'req-'.$dataId;
+        // Cada notificación real trae su propio x-request-id.
+        $requestId = 'req-'.$dataId.'-'.bin2hex(random_bytes(4));
 
         return $this->postJson(
             "/api/v1/webhooks/mercadopago?type={$tipo}&data.id={$dataId}",

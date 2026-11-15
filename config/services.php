@@ -53,6 +53,23 @@ return [
         'sandbox' => (bool) env('MERCADOPAGO_SANDBOX', true),
         'timeout_segundos' => (float) env('MERCADOPAGO_TIMEOUT_SEGUNDOS', 10),
         'preferencia_vigencia_minutos' => (int) env('MERCADOPAGO_PREFERENCIA_VIGENCIA_MINUTOS', 30),
+        // Clave PÚBLICA (APP_USR-... / TEST-...) para MercadoPago.js y los
+        // SDK móviles (tokenización de tarjetas). No es un secreto.
+        'public_key' => env('MERCADOPAGO_PUBLIC_KEY'),
+        // Ventana temporal del ts de x-signature (0 = no validar el tiempo).
+        'webhook_tolerancia_segundos' => (int) env('MERCADOPAGO_WEBHOOK_TOLERANCIA_SEGUNDOS', 900),
+        // Cobros automáticos sin CVV (producto "Pagos automáticos"). Requiere
+        // la autorización del equipo comercial de Mercado Pago.
+        'pagos_automaticos' => (bool) env('MERCADOPAGO_PAGOS_AUTOMATICOS', false),
+        // Reintegrar sin intervención humana los cobros aprobados que no se
+        // aplicaron (pago duplicado o tardío). Por defecto lo decide un admin.
+        'reintegro_automatico' => (bool) env('MERCADOPAGO_REINTEGRO_AUTOMATICO', false),
+        'max_medios_por_cliente' => (int) env('MERCADOPAGO_MAX_TARJETAS_POR_CLIENTE', 5),
+        // Versión del texto de consentimiento que acepta el pasajero al
+        // guardar una tarjeta o autorizar cobros automáticos.
+        'consentimiento_version' => env('MERCADOPAGO_CONSENTIMIENTO_VERSION', '2026-11'),
+        // Texto en el resumen de la tarjeta (máx. 22 caracteres).
+        'descriptor' => env('MERCADOPAGO_DESCRIPTOR', 'REMISERIA LH'),
     ],
 
     /*

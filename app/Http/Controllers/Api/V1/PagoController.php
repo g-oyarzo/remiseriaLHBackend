@@ -8,6 +8,7 @@ use App\Enums\EstadoPago;
 use App\Enums\RolPersona;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\RegistrarPagoRequest;
+use App\Models\MedioPagoGuardado;
 use App\Models\Pago;
 use App\Models\Viaje;
 use App\OpenApi\Schemas\CobroMercadoPagoSchema;
@@ -137,6 +138,107 @@ class PagoController extends Controller
                 'vigente_hasta' => $pago->preferencia_expira_en?->toIso8601String(),
             ],
         ], $nuevo ? Response::HTTP_CREATED : Response::HTTP_OK);
+    }
+
+    /**
+     * POST /api/v1/cliente/viajes/{viaje}/pago/tarjeta
+     */
+    #[OA\Post(
+        path: '/cliente/viajes/{viaje}/pago/tarjeta',
+        summary: 'Pagar un viaje finalizado con una tarjeta guardada',
+        description: 'Solo el pasajero del viaje. El frontend genera un token nuevo con MercadoPago.js (createCardToken con el card_id de la tarjeta guardada y el CVV que ingresa el pasajero; Mercado Pago no guarda el CVV) y lo envía con medio_pago_id. El backend crea el pago por el importe exacto del viaje, lo consulta en Mercado Pago y lo confirma solo si está aprobado. Si había un enlace de pago vigente, se vence. Un rechazo deja el pago pendiente para reintentar o pagar por otro medio.',
+        tags: ['Pagos'],
+        security: [['bearerAuth' => []]],
+        parameters: [new OA\Parameter(name: 'viaje', in: 'path', required: true, schema: new OA\Schema(type: 'integer'))],
+        requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(required: ['medio_pago_id', 'token'], properties: [
+            new OA\Property(property: 'medio_pago_id', type: 'integer'),
+            new OA\Property(property: 'token', type: 'string'),
+        ])),
+        responses: [
+            new OA\Response(response: 200, description: 'Resultado del cobro (aprobado: estado "confirmado"; rechazado: "pendiente" con mp_status_detail).'),
+            new OA\Response(response: 403, description: 'No es el pasajero del viaje.', content: new OA\JsonContent(ref: ErrorResponse::class)),
+            new OA\Response(response: 404, description: 'Viaje o tarjeta inexistentes (o ajenos).', content: new OA\JsonContent(ref: ErrorResponse::class)),
+            new OA\Response(response: 409, description: 'El viaje no está finalizado, ya está cobrado, o hay otro cobro en curso.', content: new OA\JsonContent(ref: ErrorResponse::class)),
+            new OA\Response(response: 422, description: 'Datos inválidos o Mercado Pago rechazó el token (pedir el CVV de nuevo).', content: new OA\JsonContent(ref: ValidationErrorResponse::class)),
+            new OA\Response(response: 503, description: 'Mercado Pago no está habilitado o no respondió.', content: new OA\JsonContent(ref: ErrorResponse::class)),
+        ],
+    )]
+    public function tarjeta(Request $request, Viaje $viaje, CobrosMercadoPago $cobros): JsonResponse
+    {
+        $validated = $request->validate([
+            'medio_pago_id' => ['required', 'integer'],
+            'token' => ['required', 'string', 'regex:/^[A-Za-z0-9]{16,64}$/'],
+        ]);
+
+        if ($viaje->cliente_id !== $request->user()->persona_id) {
+            return response()->json(['message' => 'Solo el pasajero del viaje puede pagarlo con sus tarjetas.'], Response::HTTP_FORBIDDEN);
+        }
+
+        $medio = MedioPagoGuardado::query()->activos()
+            ->where('cliente_id', $request->user()->persona_id)
+            ->findOrFail($validated['medio_pago_id']);
+
+        try {
+            $cobro = $cobros->cobrarConTarjeta($viaje->id, $request->user()->persona_id, $medio, $validated['token']);
+        } catch (PagoRechazado $e) {
+            return response()->json(['message' => $e->getMessage()] + $e->datos, $e->status);
+        } catch (MercadoPagoNoDisponible) {
+            return response()->json([
+                'message' => 'No se pudo completar el cobro con Mercado Pago. Consultá el estado del pago antes de reintentar.',
+            ], Response::HTTP_SERVICE_UNAVAILABLE);
+        }
+
+        $pago = $cobro['pago'];
+
+        return response()->json([
+            'message' => match ($cobro['resultado']) {
+                'confirmado' => 'Pago aprobado.',
+                'requiere_revision' => 'El pago requiere revisión administrativa.',
+                default => $cobro['mp_status'] === 'rejected' ? 'Mercado Pago rechazó el pago.' : 'El pago está en proceso.',
+            },
+            'data' => self::conComprobante($pago) + [
+                'mp_status' => $cobro['mp_status'],
+                'mp_status_detail' => $cobro['mp_status_detail'],
+            ],
+        ]);
+    }
+
+    /**
+     * POST /api/v1/admin/pagos/{pago}/reintegrar
+     */
+    #[OA\Post(
+        path: '/admin/pagos/{pago}/reintegrar',
+        summary: 'Reintegrar un cobro de Mercado Pago aprobado que no se aplicó',
+        description: 'Para pagos dobles o tardíos (el pasajero pagó el enlace después de pagar en efectivo, o pagó dos veces). Solo acepta operaciones que el historial registra como "mercadopago_aprobado_sin_aplicar" o "mercadopago_importe_no_coincide"; nunca la operación que confirmó el pago. Idempotente. El resultado definitivo llega por webhook.',
+        tags: ['Pagos'],
+        security: [['bearerAuth' => []]],
+        parameters: [new OA\Parameter(name: 'pago', in: 'path', required: true, schema: new OA\Schema(type: 'integer'))],
+        requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(required: ['mp_operacion_id'], properties: [
+            new OA\Property(property: 'mp_operacion_id', type: 'string', example: '987654321'),
+        ])),
+        responses: [
+            new OA\Response(response: 202, description: 'Reintegro solicitado (o ya se había solicitado).'),
+            new OA\Response(response: 409, description: 'La operación no es un cobro no aplicado de este pago.', content: new OA\JsonContent(ref: ErrorResponse::class)),
+            new OA\Response(response: 503, description: 'Mercado Pago no está habilitado o no respondió.', content: new OA\JsonContent(ref: ErrorResponse::class)),
+        ],
+    )]
+    public function reintegrar(Request $request, Pago $pago, CobrosMercadoPago $cobros): JsonResponse
+    {
+        $validated = $request->validate([
+            'mp_operacion_id' => ['required', 'string', 'regex:/^[A-Za-z0-9_-]{1,64}$/'],
+        ]);
+
+        try {
+            $resultado = $cobros->reintegrarOperacionNoAplicada($pago->id, $validated['mp_operacion_id'], $request->user()->persona_id);
+        } catch (PagoRechazado $e) {
+            return response()->json(['message' => $e->getMessage()], $e->status);
+        } catch (MercadoPagoNoDisponible) {
+            return response()->json(['message' => 'Mercado Pago no respondió; reintentá en unos minutos.'], Response::HTTP_SERVICE_UNAVAILABLE);
+        }
+
+        return response()->json([
+            'message' => $resultado === 'ya_solicitado' ? 'El reintegro ya se había solicitado.' : 'Reintegro solicitado a Mercado Pago.',
+        ], Response::HTTP_ACCEPTED);
     }
 
     /**
