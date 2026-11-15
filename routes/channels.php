@@ -2,7 +2,6 @@
 
 declare(strict_types=1);
 
-use App\Enums\EstadoViaje;
 use App\Enums\RolPersona;
 use App\Models\Cuenta;
 use App\Models\Viaje;
@@ -49,27 +48,22 @@ Broadcast::channel('viaje.{viajeId}', function (Cuenta $cuenta, int $viajeId) {
 });
 
 /**
- * Canal privado del conductor: ubicación GPS (UbicacionConductorActualizada)
- * y despachos de viajes pendientes. Puede escuchar el propio conductor, un
- * administrador, o el cliente que tiene actualmente un viaje activo
- * (aceptado / en curso) asignado a ese conductor (para ver su posición en
- * el mapa en tiempo real).
+ * Canal privado del conductor: su ubicación GPS y sus ofertas de viaje
+ * (asignacion.ofrecida / asignacion.retirada, con origen y destino de otros
+ * pasajeros). Solo el propio conductor y los administradores.
+ *
+ * Seguridad (SEC-01): antes también podía suscribirse el cliente con un viaje
+ * activo con ese conductor. Reverb autoriza solo al suscribirse, así que al
+ * terminar el viaje el cliente seguía recibiendo la posición del conductor y
+ * las ofertas con direcciones de otros pasajeros. El pasajero recibe la
+ * ubicación por el canal viaje.{id}, y solo mientras su viaje está activo.
  */
-Broadcast::channel('conductor.{conductorId}', function (Cuenta $cuenta, int $conductorId) {
-    if ($cuenta->rol === RolPersona::Administrador) {
-        return true;
-    }
-
-    if ($cuenta->rol === RolPersona::Conductor) {
-        return $cuenta->persona_id === $conductorId;
-    }
-
-    // Cliente: solo si tiene un viaje activo con ese conductor asignado.
-    return Viaje::query()
-        ->where('conductor_id', $conductorId)
-        ->where('cliente_id', $cuenta->persona_id)
-        ->whereIn('estado', [EstadoViaje::Aceptado, EstadoViaje::EnCurso])
-        ->exists();
+Broadcast::channel('conductor.{conductorId}', function (Cuenta $cuenta, int $conductorId): bool {
+    return match ($cuenta->rol) {
+        RolPersona::Administrador => true,
+        RolPersona::Conductor => $cuenta->persona_id === $conductorId,
+        default => false,
+    };
 });
 
 /**
