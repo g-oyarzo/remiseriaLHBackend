@@ -7,6 +7,7 @@ use App\Services\Clima\OpenMeteoProveedorClima;
 use App\Services\Clima\ProveedorClima;
 use App\Services\Clima\SinProveedorClima;
 use App\Services\Mapas\GoogleRoutesProveedorDistancia;
+use App\Services\Mapas\OpenRouteServiceProveedorDistancia;
 use App\Services\Mapas\OsrmProveedorDistancia;
 use App\Services\Mapas\ProveedorDistancia;
 use App\Services\Mapas\SinProveedorDistancia;
@@ -37,10 +38,13 @@ class AppServiceProvider extends ServiceProvider
                 'osrm' => filled($config['osrm']['url'] ?? null)
                     ? new OsrmProveedorDistancia($config['osrm']['url'])
                     : 'falta MAPAS_OSRM_URL',
+                'ors' => filled($config['ors']['api_key'] ?? null)
+                    ? new OpenRouteServiceProveedorDistancia($config['ors']['api_key'], $config['ors']['url'], $config['ors']['perfil'] ?? 'driving-car')
+                    : 'falta ORS_API_KEY',
                 'google' => filled($config['google']['api_key'] ?? null)
                     ? new GoogleRoutesProveedorDistancia($config['google']['api_key'], $config['google']['url'])
                     : 'falta GOOGLE_MAPS_API_KEY',
-                'ninguno' => new SinProveedorDistancia,
+                'ninguno', 'zonas' => new SinProveedorDistancia,
                 default => 'driver desconocido',
             };
 

@@ -8,6 +8,7 @@ use App\Enums\MetodoCotizacion;
 use App\Models\Tarifa;
 use App\Models\ZonaTarifaria;
 use App\Services\Mapas\ProveedorDistancia;
+use App\Services\Mapas\RutaInexistente;
 use App\Services\Mapas\ServicioMapasNoDisponible;
 use App\Support\Dinero;
 use App\ValueObjects\Coordinate;
@@ -57,6 +58,14 @@ final class CotizadorService
 
         try {
             $ruta = $this->mapas->calcularRuta($origen, $destino);
+        } catch (RutaInexistente $e) {
+            // El proveedor respondió bien y confirmó que no hay recorrido
+            // por calles: cobrar por zonas sería inventar un precio.
+            if (config('services.mapas.rechazar_sin_ruta')) {
+                throw new CotizacionNoDisponible('No se encontró un recorrido por calles entre el origen y el destino. Verificá los puntos elegidos.');
+            }
+
+            return $this->cotizarPorContingencia($tarifa, $distanciaLinealMetros)->conRecargo($recargo);
         } catch (ServicioMapasNoDisponible) {
             return $this->cotizarPorContingencia($tarifa, $distanciaLinealMetros)->conRecargo($recargo);
         }

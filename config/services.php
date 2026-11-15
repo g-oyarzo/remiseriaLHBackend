@@ -75,16 +75,63 @@ return [
     /*
     | Servicio externo de ruteo usado por el cotizador (CU 02).
     |
-    | driver: "osrm" (OpenStreetMap, servidor propio o público), "google"
-    | (Google Maps Routes API) o "ninguno". Por defecto es "ninguno": sin
-    | configuración explícita no se envían coordenadas de pasajeros a ningún
-    | tercero y el cotizador usa directamente la contingencia por zonas.
+    | driver:
+    | - "ors": openrouteservice (HeiGIT). Plan Standard gratuito, sin
+    |   facturación. Recomendado para empezar (docs/ARQUITECTURA_Y_COSTOS.md).
+    | - "google": Google Maps Routes API (SKU Essentials, sin tráfico).
+    |   Requiere una cuenta de facturación habilitada en Google Cloud.
+    | - "osrm": instancia OSRM propia (alternativa de escalabilidad futura).
+    | - "ninguno" (alias "zonas"): sin servicio de mapas; siempre contingencia.
+    |
+    | Por defecto es "ninguno": sin configuración explícita no se envían
+    | coordenadas de pasajeros a ningún tercero.
+    |
+    | Las cuotas locales cortan las consultas ANTES de llegar al límite del
+    | proveedor (0 o vacío = sin límite). Al agotarse, el cotizador usa la
+    | contingencia por zonas hasta el período siguiente.
     */
     'mapas' => [
         'driver' => env('MAPAS_DRIVER', 'ninguno'),
         'timeout_segundos' => (float) env('MAPAS_TIMEOUT_SEGUNDOS', 3),
         'reintentos' => (int) env('MAPAS_REINTENTOS', 1),
         'cache_minutos' => (int) env('MAPAS_CACHE_MINUTOS', 10),
+        // Store para cuotas y circuit breaker (null = CACHE_STORE). En
+        // producción, "redis", para compartir el estado entre procesos.
+        'cache_store' => env('MAPAS_CACHE_STORE'),
+        // Si el proveedor confirma que no hay recorrido por calles, se
+        // rechaza la cotización en lugar de cobrar por zonas.
+        'rechazar_sin_ruta' => (bool) env('MAPAS_RECHAZAR_SIN_RUTA', true),
+        'circuito' => [
+            'umbral_fallas' => (int) env('MAPAS_CIRCUITO_UMBRAL_FALLAS', 3),
+            'segundos_abierto' => (int) env('MAPAS_CIRCUITO_SEGUNDOS', 60),
+            'segundos_tras_429' => (int) env('MAPAS_CIRCUITO_SEGUNDOS_TRAS_429', 300),
+        ],
+        'cuotas' => [
+            // Plan Standard: 2.000/día y 40/min en Directions (se deja margen).
+            'ors' => [
+                'por_minuto' => env('MAPAS_ORS_CUOTA_POR_MINUTO', 35),
+                'por_dia' => env('MAPAS_ORS_CUOTA_POR_DIA', 1900),
+                'por_mes' => env('MAPAS_ORS_CUOTA_POR_MES'),
+            ],
+            // Compute Routes Essentials: 10.000 gratuitas por mes; luego se
+            // factura. El tope mensual evita cargos.
+            'google' => [
+                'por_minuto' => env('MAPAS_GOOGLE_CUOTA_POR_MINUTO', 60),
+                'por_dia' => env('MAPAS_GOOGLE_CUOTA_POR_DIA', 320),
+                'por_mes' => env('MAPAS_GOOGLE_CUOTA_POR_MES', 9500),
+            ],
+            // Instancia propia: sin cuota externa.
+            'osrm' => [
+                'por_minuto' => env('MAPAS_OSRM_CUOTA_POR_MINUTO'),
+                'por_dia' => env('MAPAS_OSRM_CUOTA_POR_DIA'),
+                'por_mes' => env('MAPAS_OSRM_CUOTA_POR_MES'),
+            ],
+        ],
+        'ors' => [
+            'api_key' => env('ORS_API_KEY'),
+            'url' => env('ORS_URL', 'https://api.heigit.org/openrouteservice'),
+            'perfil' => env('ORS_PERFIL', 'driving-car'),
+        ],
         'osrm' => [
             'url' => env('MAPAS_OSRM_URL'),
         ],

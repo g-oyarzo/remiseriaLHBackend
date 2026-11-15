@@ -8,7 +8,11 @@ use RuntimeException;
 
 /**
  * El proveedor de mapas no pudo devolver una ruta válida (error de red,
- * timeout, respuesta inválida o sin ruta). El mensaje nunca incluye la URL
- * ni las credenciales del proveedor.
+ * timeout, respuesta inválida, cuota agotada o circuito abierto). El
+ * cotizador aplica la contingencia por zonas. El mensaje nunca incluye la
+ * URL ni las credenciales del proveedor.
+ *
+ * Subclases: RutaInexistente (el proveedor respondió bien, pero no hay
+ * recorrido por calles) y LimiteDelProveedorAlcanzado (HTTP 429).
  */
-final class ServicioMapasNoDisponible extends RuntimeException {}
+class ServicioMapasNoDisponible extends RuntimeException {}

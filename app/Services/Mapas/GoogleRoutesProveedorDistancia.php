@@ -42,10 +42,14 @@ final class GoogleRoutesProveedorDistancia extends ProveedorHttp
                 'units' => 'METRIC',
             ]);
 
-        $ruta = $this->exigirExito($respuesta)->json('routes.0');
+        $json = $this->exigirExito($respuesta)->json();
+        $ruta = is_array($json) ? ($json['routes'][0] ?? null) : null;
 
         if (! is_array($ruta)) {
-            throw new ServicioMapasNoDisponible('Google Routes no encontró una ruta entre los puntos.');
+            // Una respuesta 200 con cuerpo vacío ({}) significa que no hay ruta.
+            throw $json === []
+                ? new RutaInexistente('Google Routes no encontró un recorrido por calles entre los puntos.')
+                : new ServicioMapasNoDisponible('Google Routes devolvió una respuesta sin rutas.');
         }
 
         // La duración llega como string con sufijo de segundos, p. ej. "754s".
