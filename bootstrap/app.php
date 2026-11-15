@@ -26,6 +26,11 @@ return Application::configure(basePath: dirname(__DIR__))
             'role' => \App\Http\Middleware\CheckRole::class,
         ]);
         $middleware->statefulApi();
+        // Seguridad (SEC-16, hallado con OWASP ZAP): una request a la API sin
+        // token y sin "Accept: application/json" respondía 500, porque el
+        // middleware intentaba redirigir a una ruta "login" inexistente. La
+        // API no redirige: responde 401 en JSON.
+        $middleware->redirectGuestsTo(fn (Request $request): ?string => $request->is('api/*') ? null : '/');
         // Límite general por usuario/IP para toda la API (ver
         // config('remiseria.rate_limits') y AppServiceProvider).
         $middleware->throttleApi('api');

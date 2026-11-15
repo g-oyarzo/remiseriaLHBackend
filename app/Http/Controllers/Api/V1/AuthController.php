@@ -18,6 +18,7 @@ use App\OpenApi\Schemas\LoginRequest as LoginRequestSchema;
 use App\OpenApi\Schemas\MeResponse as MeResponseSchema;
 use App\OpenApi\Schemas\RefreshTokenResponse as RefreshTokenResponseSchema;
 use App\OpenApi\Schemas\RegisterRequest as RegisterRequestSchema;
+use App\OpenApi\Schemas\ServerErrorResponse;
 use App\OpenApi\Schemas\SimpleMessageResponse;
 use App\OpenApi\Schemas\ValidationErrorResponse;
 use Illuminate\Database\QueryException;
@@ -25,8 +26,8 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Str;
-use Illuminate\Validation\Rules\Enum;
 use Illuminate\Validation\ValidationException;
 use OpenApi\Attributes as OA;
 use Symfony\Component\HttpFoundation\Response;
@@ -51,7 +52,7 @@ class AuthController extends Controller
             new OA\Response(response: 200, description: 'Login exitoso.', content: new OA\JsonContent(ref: AuthTokenResponseSchema::class)),
             new OA\Response(response: 401, description: 'Credenciales inválidas.', content: new OA\JsonContent(ref: ErrorResponse::class)),
             new OA\Response(response: 422, description: 'Error de validación.', content: new OA\JsonContent(ref: ValidationErrorResponse::class)),
-            new OA\Response(response: 500, description: 'Error interno del servidor.', content: new OA\JsonContent(ref: \App\OpenApi\Schemas\ServerErrorResponse::class)),
+            new OA\Response(response: 500, description: 'Error interno del servidor.', content: new OA\JsonContent(ref: ServerErrorResponse::class)),
         ],
     )]
     public function login(Request $request): JsonResponse
@@ -60,6 +61,18 @@ class AuthController extends Controller
             'email' => ['required', 'string', 'email'],
             'password' => ['required', 'string'],
         ]);
+
+        // Seguridad (SEC-05): límite de intentos fallidos por cuenta, además
+        // del límite por IP de la ruta (que no frena un ataque distribuido).
+        // Se aplica igual exista o no el email, para no permitir enumerarlo.
+        $claveIntentos = 'login:'.hash('sha256', mb_strtolower(trim($validated['email'])));
+        $maxIntentos = max(1, (int) config('remiseria.abuso.login_intentos_por_cuenta'));
+
+        if (RateLimiter::tooManyAttempts($claveIntentos, $maxIntentos)) {
+            return response()->json([
+                'message' => 'Demasiados intentos fallidos. Intentá de nuevo más tarde.',
+            ], Response::HTTP_TOO_MANY_REQUESTS, ['Retry-After' => (string) RateLimiter::availableIn($claveIntentos)]);
+        }
 
         $cuenta = Cuenta::query()
             ->where('email', $validated['email'])
@@ -77,6 +90,8 @@ class AuthController extends Controller
         $hashParaComparar = $cuenta->password ?? self::hashSeñuelo();
 
         if (! $cuenta || ! Hash::check($validated['password'], $hashParaComparar)) {
+            RateLimiter::hit($claveIntentos, max(60, (int) config('remiseria.abuso.login_bloqueo_segundos')));
+
             return response()->json([
                 'message' => 'Credenciales inválidas.',
             ], Response::HTTP_UNAUTHORIZED);
@@ -90,6 +105,8 @@ class AuthController extends Controller
                 'message' => 'La cuenta se encuentra deshabilitada.',
             ], Response::HTTP_FORBIDDEN);
         }
+
+        RateLimiter::clear($claveIntentos);
 
         // Revocar tokens anteriores para evitar acumulación (1 sesión activa).
         $cuenta->tokens()->delete();
