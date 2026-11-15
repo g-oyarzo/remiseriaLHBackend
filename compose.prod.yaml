@@ -1,0 +1,202 @@
+# Despliegue de producción / staging en UNA máquina (Oracle Cloud Always Free
+# Ampere A1, 2 OCPU / 12 GB, linux/arm64) o en cualquier VM con Docker.
+#
+#   docker compose -f compose.prod.yaml --env-file .env.production up -d --build
+#
+# compose.yaml (Sail) sigue siendo el entorno de DESARROLLO local.
+#
+# Seguridad de red: solo NGINX publica puertos (80/443). PHP-FPM, Reverb,
+# MySQL y Redis no publican ningún puerto: solo se alcanzan por la red
+# interna de Docker. Para administrarlos usar `docker compose exec`.
+#
+# Separación futura (docs/ARQUITECTURA_Y_COSTOS.md): cada servicio usa
+# variables de entorno para ubicar a los demás (DB_HOST, REDIS_HOST,
+# REVERB_*), así que mysql, redis, reverb o los workers se pueden mover a
+# otra máquina o a un servicio administrado cambiando solo el .env.
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+x-app: &app
+  # La imagen la construye el servicio "app"; queue, scheduler y reverb la reutilizan.
+  image: ${RLH_IMAGEN_APP:-remiseria-lh/app:local}
+  pull_policy: never
+  env_file:
+    - ${RLH_ENV_FILE:-.env.production}
+  environment:
+    # Valores que dependen de la topología de este compose.
+    DB_HOST: mysql
+    REDIS_HOST: redis
+    TRUSTED_PROXIES: 172.30.0.0/24
+  volumes:
+    - comprobantes:/var/www/html/storage/app/private
+    - logs:/var/www/html/storage/logs
+  networks:
+    - interna
+  restart: unless-stopped
+  logging: *logging
+  depends_on:
+    mysql:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+
+services:
+  nginx:
+    build:
+      context: .
+      dockerfile: deploy/docker/nginx/Dockerfile
+    image: ${RLH_IMAGEN_NGINX:-remiseria-lh/nginx:local}
+    ports:
+      - "${NGINX_PUERTO_HTTP:-80}:80"
+      - "${NGINX_PUERTO_HTTPS:-443}:443"
+    environment:
+      SERVER_NAME: ${SERVER_NAME:-localhost}
+      NGINX_LIMITE_API_RPS: ${NGINX_LIMITE_API_RPS:-30}
+      NGINX_RAFAGA_API: ${NGINX_RAFAGA_API:-60}
+      NGINX_CONEXIONES_WS_POR_IP: ${NGINX_CONEXIONES_WS_POR_IP:-50}
+    volumes:
+      # produccion.conf.template (TLS) o local.conf.template (solo HTTP).
+      - ./deploy/docker/nginx/${NGINX_PLANTILLA:-produccion.conf.template}:/etc/nginx/templates/default.conf.template:ro
+      - ./deploy/certbot/conf:/etc/letsencrypt:ro
+      - ./deploy/certbot/www:/var/www/certbot:ro
+    # Recarga cada 12 h para tomar los certificados renovados.
+    command: ["/bin/sh", "-c", "(while :; do sleep 12h; nginx -s reload; done) & exec /docker-entrypoint.sh nginx -g 'daemon off;'"]
+    networks:
+      - interna
+    restart: unless-stopped
+    logging: *logging
+    mem_limit: 256m
+    depends_on:
+      app:
+        condition: service_healthy
+      reverb:
+        condition: service_healthy
+
+  app:
+    <<: *app
+    pull_policy: build
+    build:
+      context: .
+      dockerfile: deploy/docker/php/Dockerfile
+    mem_limit: 2g
+
+  # Worker de colas (asignación de conductores, difusiones en tiempo real,
+  # comprobantes, cobros automáticos). Escalar con --scale queue=N.
+  queue:
+    <<: *app
+    command: ["php", "artisan", "queue:work", "--sleep=1", "--tries=3", "--backoff=5", "--max-time=3600", "--memory=192"]
+    healthcheck:
+      disable: true
+    stop_grace_period: 60s
+    mem_limit: 512m
+
+  scheduler:
+    <<: *app
+    command: ["php", "artisan", "schedule:work"]
+    healthcheck:
+      disable: true
+    mem_limit: 256m
+
+  reverb:
+    <<: *app
+    command: ["php", "artisan", "reverb:start", "--host=0.0.0.0", "--port=8080"]
+    healthcheck:
+      test: ["CMD", "nc", "-z", "127.0.0.1", "8080"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    mem_limit: 1g
+
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: ${DB_DATABASE}
+      MYSQL_USER: ${DB_USERNAME}
+      MYSQL_PASSWORD: ${DB_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
+      TZ: America/Argentina/Buenos_Aires
+    command:
+      - --innodb-buffer-pool-size=${MYSQL_BUFFER_POOL:-2G}
+      - --max-connections=200
+      - --skip-name-resolve
+    volumes:
+      - mysql:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u root -p\"$${MYSQL_ROOT_PASSWORD}\" --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+    networks:
+      - interna
+    restart: unless-stopped
+    logging: *logging
+    mem_limit: 4g
+
+  redis:
+    image: redis:7.4-alpine
+    command:
+      - redis-server
+      - --requirepass
+      - ${REDIS_PASSWORD}
+      - --appendonly
+      - "yes"
+      - --maxmemory
+      - ${REDIS_MAXMEMORY:-768mb}
+      # Las colas viven en Redis: nunca expulsar claves.
+      - --maxmemory-policy
+      - noeviction
+    environment:
+      REDISCLI_AUTH: ${REDIS_PASSWORD}
+    volumes:
+      - redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - interna
+    restart: unless-stopped
+    logging: *logging
+    mem_limit: 1g
+
+  # Renovación de certificados TLS (Let's Encrypt). Solo con --profile tls.
+  certbot:
+    image: certbot/certbot:v4.1.1
+    profiles: ["tls"]
+    volumes:
+      - ./deploy/certbot/conf:/etc/letsencrypt
+      - ./deploy/certbot/www:/var/www/certbot
+    entrypoint: ["/bin/sh", "-c", "trap exit TERM; while :; do certbot renew --webroot -w /var/www/certbot --quiet; sleep 12h & wait $${!}; done"]
+    restart: unless-stopped
+    logging: *logging
+
+  # OSRM propio: alternativa FUTURA, desactivada. No ejecutar en la VM
+  # gratuita (preprocesar Argentina requiere decenas de GB de RAM/disco).
+  # Ver docs/ARQUITECTURA_Y_COSTOS.md, sección "OSRM".
+  # osrm:
+  #   image: ghcr.io/project-osrm/osrm-backend:v5.27.1
+  #   profiles: ["osrm"]
+  #   command: ["osrm-routed", "--algorithm", "mld", "/data/region.osrm"]
+  #   volumes:
+  #     - ./deploy/osrm:/data:ro
+  #   networks:
+  #     - interna
+
+networks:
+  interna:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
+
+volumes:
+  mysql:
+  redis:
+  comprobantes:
+  logs:

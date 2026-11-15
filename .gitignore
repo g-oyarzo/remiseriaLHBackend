@@ -27,3 +27,11 @@ Homestead.yaml
 Thumbs.db
 # Especificación OpenAPI generada por l5-swagger (se regenera, no se versiona)
 /storage/api-docs
+
+# Entornos y artefactos de despliegue (deploy/)
+.env.staging
+.env.carga
+/deploy/certbot/conf
+/deploy/certbot/www
+/deploy/backup/*.local
+/deploy/carga/resultados

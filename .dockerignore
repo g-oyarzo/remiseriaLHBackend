@@ -1,0 +1,22 @@
+# Nunca enviar al contexto de build secretos, dependencias del host ni
+# artefactos locales. vendor/ se instala dentro de la imagen (sin dev).
+.git
+.env
+.env.*
+!.env.example
+vendor
+node_modules
+storage/logs/*
+storage/app/private/*
+storage/framework/cache/*
+storage/framework/sessions/*
+storage/framework/views/*
+storage/api-docs
+bootstrap/cache/*.php
+graphify-out
+tests
+deploy/backup/*.local
+deploy/carga/resultados
+*.log
+.phpunit.result.cache
+clover.xml
