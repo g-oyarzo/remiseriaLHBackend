@@ -48,6 +48,17 @@ fallar() { log "ERROR: $*"; exit 1; }
 [ -f "$RLH_ENV_FILE" ] || fallar "no existe $RLH_ENV_FILE"
 [ -n "${BACKUP_CLAVE_ARCHIVO:-}" ] && [ -s "$BACKUP_CLAVE_ARCHIVO" ] || fallar "BACKUP_CLAVE_ARCHIVO no definido o vacío"
 command -v openssl >/dev/null || fallar "falta openssl"
+PYTHON="${PYTHON:-python3}"
+"$PYTHON" -I -c 'import hmac' 2>/dev/null || fallar "falta python3 (necesario para el HMAC del backup)"
+# La clave debe ser legible solo por el dueño (no 0644).
+if [ "$(uname -s)" = "Linux" ] && [ -n "$(find "$BACKUP_CLAVE_ARCHIVO" -perm /077 2>/dev/null)" ]; then
+    fallar "BACKUP_CLAVE_ARCHIVO tiene permisos demasiado abiertos (usar chmod 600)"
+fi
+
+mkdir -p "$BACKUP_DIR"
+case "$(cd "$(dirname "$BACKUP_CLAVE_ARCHIVO")" && pwd)/" in
+    "$(cd "$BACKUP_DIR" && pwd)/"*) fallar "la clave no puede guardarse dentro de BACKUP_DIR (viajaría junto con los backups)" ;;
+esac
 
 SELLO="$(date '+%Y%m%d-%H%M%S')"
 TRABAJO="$(mktemp -d)"
@@ -86,6 +97,9 @@ log "cifrando $NOMBRE"
 tar -C "$TRABAJO" -cf - MANIFIESTO db.sql.gz comprobantes.tar.gz \
     | openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt -pass "file:$BACKUP_CLAVE_ARCHIVO" -out "$BACKUP_DIR/$NOMBRE"
 ( cd "$BACKUP_DIR" && sha256sum "$NOMBRE" > "$NOMBRE.sha256" )
+# Autenticación del archivo cifrado (SEC-09): restore.sh la verifica antes de descifrar.
+"$PYTHON" -I "$RAIZ/deploy/backup/hmac.py" firmar "$BACKUP_CLAVE_ARCHIVO" "$BACKUP_DIR/$NOMBRE" > "$BACKUP_DIR/$NOMBRE.hmac" \
+    || fallar "no se pudo calcular el HMAC"
 
 # Prueba de lectura inmediata: el archivo se puede descifrar y listar.
 openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass "file:$BACKUP_CLAVE_ARCHIVO" -in "$BACKUP_DIR/$NOMBRE" | tar -tf - >/dev/null \
@@ -98,6 +112,7 @@ if [ -n "$BACKUP_RCLONE_DESTINO" ]; then
     log "subiendo a $BACKUP_RCLONE_DESTINO"
     rclone copy --immutable "$BACKUP_DIR/$NOMBRE" "$BACKUP_RCLONE_DESTINO/"
     rclone copy --immutable "$BACKUP_DIR/$NOMBRE.sha256" "$BACKUP_RCLONE_DESTINO/"
+    rclone copy --immutable "$BACKUP_DIR/$NOMBRE.hmac" "$BACKUP_RCLONE_DESTINO/"
     rclone check --one-way --include "$NOMBRE" "$BACKUP_DIR" "$BACKUP_RCLONE_DESTINO" || fallar "la copia remota no coincide"
     log "retención remota: borrando copias de más de $BACKUP_RETENCION_REMOTA_DIAS días"
     rclone delete --min-age "${BACKUP_RETENCION_REMOTA_DIAS}d" --include 'remiseria-*.tar.enc*' "$BACKUP_RCLONE_DESTINO/"
