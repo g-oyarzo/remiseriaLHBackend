@@ -95,7 +95,9 @@ class ViajeResource extends JsonResource
             }),
             'vehiculo' => $this->whenLoaded('vehiculo', fn () => $this->vehiculo?->toArray()),
             'tarifa' => $this->whenLoaded('tarifa', fn () => $this->tarifa?->toArray()),
-            'pago' => $this->whenLoaded('pago', fn () => $this->pago?->toArray()),
+            // SEC-03: el historial de auditoría y los datos internos del
+            // pago son solo para administradores.
+            'pago' => $this->whenLoaded('pago', fn () => $esAdmin ? $this->pago?->toArray() : $this->pago?->vistaPublica()),
             'mensajes' => $this->whenLoaded(
                 'mensajes',
                 fn () => MensajeResource::collection($this->mensajes)->resolve($request),

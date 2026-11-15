@@ -83,7 +83,7 @@ class PagoController extends Controller
 
         return response()->json([
             'message' => $creado ? 'Pago registrado exitosamente.' : 'El pago ya estaba registrado.',
-            'data' => self::conComprobante($pago),
+            'data' => self::conComprobante($pago, $cuenta->rol === RolPersona::Administrador),
         ], $creado ? Response::HTTP_CREATED : Response::HTTP_OK);
     }
 
@@ -196,7 +196,7 @@ class PagoController extends Controller
                 'requiere_revision' => 'El pago requiere revisión administrativa.',
                 default => $cobro['mp_status'] === 'rejected' ? 'Mercado Pago rechazó el pago.' : 'El pago está en proceso.',
             },
-            'data' => self::conComprobante($pago) + [
+            'data' => self::conComprobante($pago, false) + [
                 'mp_status' => $cobro['mp_status'],
                 'mp_status_detail' => $cobro['mp_status_detail'],
             ],
@@ -315,7 +315,7 @@ class PagoController extends Controller
             return response()->json(['message' => $e->getMessage()], $e->status);
         }
 
-        return response()->json(['message' => 'Pago conciliado.', 'data' => self::conComprobante($pago)]);
+        return response()->json(['message' => 'Pago conciliado.', 'data' => self::conComprobante($pago, true)]);
     }
 
     /**
@@ -324,9 +324,11 @@ class PagoController extends Controller
      *
      * @return array<string, mixed>
      */
-    private static function conComprobante(Pago $pago): array
+    private static function conComprobante(Pago $pago, bool $esAdmin): array
     {
-        return $pago->toArray() + [
+        // SEC-03: el historial de auditoría y los datos internos del pago
+        // son solo para administradores.
+        return ($esAdmin ? $pago->toArray() : $pago->vistaPublica()) + [
             'comprobante_url' => $pago->estado === EstadoPago::Confirmado
                 ? url("/api/v1/viajes/{$pago->viaje_id}/comprobante")
                 : null,
