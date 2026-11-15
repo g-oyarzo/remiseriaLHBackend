@@ -38,7 +38,6 @@ class ConciliarMercadoPagoCommand extends Command
         Pago::query()
             ->where('proveedor', CobrosMercadoPago::PROVEEDOR)
             ->where('estado', EstadoPago::Pendiente)
-            ->whereNotNull('preferencia_id')
             ->where('updated_at', '>=', now()->subDays($dias))
             ->orderBy('id')
             ->lazyById(100)

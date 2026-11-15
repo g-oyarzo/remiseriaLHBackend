@@ -26,11 +26,22 @@ class Cliente extends Model
     /** @var list<string> */
     protected $fillable = [
         'persona_id',
+        'mercadopago_customer_id',
+    ];
+
+    /** @var list<string> */
+    protected $hidden = [
+        'mercadopago_customer_id',
     ];
 
     public function persona(): BelongsTo
     {
         return $this->belongsTo(Persona::class, 'persona_id');
+    }
+
+    public function mediosDePago(): HasMany
+    {
+        return $this->hasMany(MedioPagoGuardado::class, 'cliente_id');
     }
 
     public function viajes(): HasMany

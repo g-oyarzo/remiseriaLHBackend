@@ -10,6 +10,7 @@ use App\Services\Pagos\MercadoPago\FirmaWebhook;
 use App\Services\Pagos\MercadoPago\MercadoPagoNoDisponible;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use OpenApi\Attributes as OA;
 use Symfony\Component\HttpFoundation\Response;
@@ -22,7 +23,7 @@ class MercadoPagoWebhookController extends Controller
     #[OA\Post(
         path: '/webhooks/mercadopago',
         summary: 'Webhook de Mercado Pago (uso exclusivo del proveedor)',
-        description: 'Público, pero solo acepta notificaciones con firma x-signature válida (HMAC-SHA256 con la clave secreta de Webhooks). No confía en el cuerpo: consulta el pago en la API de Mercado Pago y valida referencia, moneda e importe exacto antes de confirmarlo. Idempotente. Responde 503 si no pudo consultar a Mercado Pago, para que el proveedor reintente.',
+        description: 'Público, pero solo acepta notificaciones con firma x-signature válida (HMAC-SHA256 con la clave secreta de Webhooks) y un ts dentro de la ventana MERCADOPAGO_WEBHOOK_TOLERANCIA_SEGUNDOS. Temas procesados: payment (Checkout Pro y tarjetas) y order (cobros automáticos). No confía en el cuerpo: consulta la operación en la API de Mercado Pago y valida referencia, moneda e importe exacto antes de confirmarla. Idempotente y con protección contra repeticiones. Responde 503 si no pudo consultar a Mercado Pago, para que el proveedor reintente.',
         tags: ['Pagos'],
         parameters: [
             new OA\Parameter(name: 'type', in: 'query', required: false, schema: new OA\Schema(type: 'string', example: 'payment')),
@@ -32,7 +33,7 @@ class MercadoPagoWebhookController extends Controller
         ],
         responses: [
             new OA\Response(response: 200, description: 'Notificación recibida (procesada o ignorada).'),
-            new OA\Response(response: 401, description: 'Firma inválida o webhook no configurado.'),
+            new OA\Response(response: 401, description: 'Firma inválida, fuera de la ventana de tiempo, o webhook no configurado.'),
             new OA\Response(response: 503, description: 'No se pudo consultar a Mercado Pago; el proveedor reintentará.'),
         ],
     )]
@@ -47,25 +48,51 @@ class MercadoPagoWebhookController extends Controller
             return response()->json(['message' => 'Webhook no configurado.'], Response::HTTP_UNAUTHORIZED);
         }
 
-        if (! FirmaWebhook::esValida($request->header('x-signature'), $request->header('x-request-id'), $dataId, $secreto)) {
-            Log::warning('Webhook de Mercado Pago con firma inválida.', ['ip' => $request->ip()]);
+        $firma = (string) $request->header('x-signature');
+        $verificacion = FirmaWebhook::verificar(
+            $firma,
+            $request->header('x-request-id'),
+            $dataId,
+            $secreto,
+            (int) config('services.mercadopago.webhook_tolerancia_segundos'),
+        );
 
-            return response()->json(['message' => 'Firma inválida.'], Response::HTTP_UNAUTHORIZED);
+        if ($verificacion !== FirmaWebhook::VALIDA) {
+            Log::warning('Webhook de Mercado Pago rechazado.', ['motivo' => $verificacion, 'ip' => $request->ip()]);
+
+            return response()->json([
+                'message' => $verificacion === FirmaWebhook::VENCIDA ? 'Notificación fuera de la ventana de tiempo permitida.' : 'Firma inválida.',
+            ], Response::HTTP_UNAUTHORIZED);
         }
 
         $tipo = $request->query('type') ?? $request->input('type');
 
-        if ($tipo !== 'payment' || $dataId === null || ! preg_match('/^\d{1,30}$/', $dataId)) {
+        $esPago = $tipo === 'payment' && $dataId !== null && preg_match('/^\d{1,30}$/', $dataId);
+        $esOrden = $tipo === 'order' && $dataId !== null && preg_match('/^[A-Za-z0-9_-]{1,64}$/', $dataId);
+
+        if (! $esPago && ! $esOrden) {
             return response()->json(['message' => 'Notificación ignorada.']);
         }
 
+        // Protección contra repeticiones: la misma firma ya procesada con
+        // éxito no se vuelve a procesar (además de la idempotencia de
+        // aplicar()). Se marca solo después de procesar, para que un
+        // reintento tras un 503 sí se procese.
+        $claveRepeticion = 'mp:webhook:'.hash('sha256', $firma.'|'.$dataId);
+
+        if (Cache::has($claveRepeticion)) {
+            return response()->json(['message' => 'Notificación ya procesada.']);
+        }
+
         try {
-            $resultado = $cobros->procesarPago($dataId);
+            $resultado = $esPago ? $cobros->procesarPago($dataId) : $cobros->procesarOrden($dataId);
         } catch (MercadoPagoNoDisponible) {
             return response()->json(['message' => 'No se pudo verificar el pago; reintentar.'], Response::HTTP_SERVICE_UNAVAILABLE);
         }
 
-        Log::info('Webhook de Mercado Pago procesado.', ['mp_payment_id' => $dataId, 'resultado' => $resultado]);
+        Cache::put($claveRepeticion, true, now()->addSeconds(max(3600, 2 * (int) config('services.mercadopago.webhook_tolerancia_segundos'))));
+
+        Log::info('Webhook de Mercado Pago procesado.', ['mp_id' => $dataId, 'tipo' => $tipo, 'resultado' => $resultado]);
 
         return response()->json(['message' => 'Notificación recibida.']);
     }

@@ -7,6 +7,7 @@ namespace App\Services\Pagos;
 use App\Enums\EstadoPago;
 use App\Enums\EstadoViaje;
 use App\Enums\MetodoPago;
+use App\Jobs\VencerPreferenciaMercadoPagoJob;
 use App\Models\Pago;
 use App\Models\Viaje;
 use App\Services\Pagos\MercadoPago\CobrosMercadoPago;
@@ -32,9 +33,11 @@ use Symfony\Component\HttpFoundation\Response;
  *   pago es idempotente; uno distinto se rechaza. Si un cobro digital se
  *   rechazó, puede volver a registrarse (queda la traza en el historial).
  * - Un cobro de Mercado Pago todavía pendiente puede reemplazarse por un
- *   registro manual (p. ej. el pasajero terminó pagando en efectivo). Si
- *   después Mercado Pago aprueba ese cobro, no se aplica: queda en el
- *   historial y en un log crítico para reintegrarlo (CobrosMercadoPago).
+ *   registro manual (p. ej. el pasajero terminó pagando en efectivo). El
+ *   enlace de pago reemplazado se vence en Mercado Pago. Si igual llega un
+ *   pago aprobado (el pasajero ya lo había iniciado), no se aplica: queda
+ *   en el historial y en un log crítico para reintegrarlo
+ *   (CobrosMercadoPago::reintegrarOperacionNoAplicada).
  * - Los cobros de Mercado Pago no se concilian a mano: los confirma el
  *   webhook o el comando pagos:conciliar-mercadopago tras consultar la API.
  */
@@ -58,8 +61,10 @@ final class RegistroDePagos
      */
     public function registrar(int $viajeId, MetodoPago $metodo, string $monto, ?string $referencia, int $registradoPor): array
     {
+        $preferenciaAVencer = null;
+
         try {
-            return DB::transaction(function () use ($viajeId, $metodo, $monto, $referencia, $registradoPor): array {
+            $resultado = DB::transaction(function () use ($viajeId, $metodo, $monto, $referencia, $registradoPor, &$preferenciaAVencer): array {
                 $viaje = Viaje::query()->lockForUpdate()->findOrFail($viajeId);
 
                 if ($viaje->estado !== EstadoViaje::Finalizado) {
@@ -94,6 +99,12 @@ final class RegistroDePagos
                 $pago = $existente ?? new Pago(['viaje_id' => $viaje->id]);
                 $confirmado = $metodo === MetodoPago::Efectivo;
 
+                // El enlace de Mercado Pago reemplazado se vence en el
+                // proveedor para que el pasajero no pueda pagarlo además.
+                if ($reemplazaMercadoPago && $existente->preferencia_id !== null && $existente->preferencia_expira_en?->isFuture()) {
+                    $preferenciaAVencer = $existente->preferencia_id;
+                }
+
                 $pago->fill([
                     'metodo_pago' => $metodo,
                     'monto' => $importe,
@@ -107,12 +118,13 @@ final class RegistroDePagos
                     'preferencia_id' => null,
                     'enlace_pago' => null,
                     'preferencia_expira_en' => null,
+                    'mp_orden_id' => null,
                 ]);
                 $pago->registrarEnHistorial(match (true) {
                     $reemplazaMercadoPago => 'reemplazo_de_cobro_mercadopago',
                     $existente !== null => 'reintento',
                     default => 'registro',
-                }, $registradoPor);
+                }, $registradoPor, array_filter(['preferencia_vencida' => $preferenciaAVencer]));
                 $pago->save();
 
                 return [$pago, true];
@@ -123,6 +135,12 @@ final class RegistroDePagos
             // cae acá, pero el lockForUpdate sobre el viaje lo previene.)
             throw new PagoRechazado('La referencia de la operación ya fue utilizada en otro pago.');
         }
+
+        if ($preferenciaAVencer !== null) {
+            VencerPreferenciaMercadoPagoJob::dispatch($preferenciaAVencer);
+        }
+
+        return $resultado;
     }
 
     /**

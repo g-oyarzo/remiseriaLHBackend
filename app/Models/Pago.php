@@ -53,6 +53,7 @@ class Pago extends Model
         'preferencia_id',
         'enlace_pago',
         'preferencia_expira_en',
+        'mp_orden_id',
         'estado',
         'registrado_por_persona_id',
         'conciliado_por_persona_id',
