@@ -233,4 +233,23 @@ return [
         'webhooks' => (int) env('RATE_LIMIT_WEBHOOKS', 300),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Límites contra abuso (ventanas largas)
+    |--------------------------------------------------------------------------
+    |
+    | - login: intentos fallidos por cuenta (email), además del límite por IP
+    |   de la ruta. Frena la fuerza bruta distribuida desde muchas IP.
+    | - vincular_tarjetas: tarjetas que una cuenta puede vincular por hora,
+    |   para que el endpoint no sirva para validar tarjetas robadas
+    |   ("card testing").
+    |
+    */
+
+    'abuso' => [
+        'login_intentos_por_cuenta' => (int) env('LOGIN_INTENTOS_POR_CUENTA', 10),
+        'login_bloqueo_segundos' => (int) env('LOGIN_BLOQUEO_SEGUNDOS', 900),
+        'vincular_tarjetas_por_hora' => (int) env('VINCULAR_TARJETAS_POR_HORA', 5),
+    ],
+
 ];
