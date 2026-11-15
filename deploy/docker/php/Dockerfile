@@ -45,7 +45,10 @@ COPY deploy/docker/php/fpm-pool.conf /usr/local/etc/php-fpm.d/zz-remiseria.conf
 COPY deploy/docker/php/entrypoint.sh /usr/local/bin/remiseria-entrypoint
 
 WORKDIR /var/www/html
-COPY --from=vendor --chown=www-data:www-data /app /var/www/html
+# El código queda de root (solo lectura para www-data): una vulnerabilidad
+# en la app no puede modificar el código ni las dependencias (SEC-12). Solo
+# storage/ y bootstrap/cache/ son escribibles.
+COPY --from=vendor /app /var/www/html
 
 # Archivos que nunca deben ir a la imagen (también listados en .dockerignore).
 RUN set -eux; \
