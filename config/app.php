@@ -54,6 +54,10 @@ return [
 
     'url' => env('APP_URL', 'http://localhost'),
 
+    // Hosts aceptados además del de APP_URL (separados por coma). Ver
+    // trustHosts en bootstrap/app.php (SEC-07).
+    'hosts_de_confianza' => env('TRUSTED_HOSTS', ''),
+
     /*
     |--------------------------------------------------------------------------
     | Application Timezone
