@@ -6,9 +6,11 @@
 # los comprobantes en un directorio local; nunca toca la base en uso salvo
 # con --reemplazar-base-actual, que además pide confirmación escrita.
 #
-# Verifica: sha256 del archivo cifrado, descifrado, sha256 de cada parte
-# (MANIFIESTO), carga del dump, cantidad de comprobantes y el sha256 de CADA
-# PDF contra la columna comprobantes.sha256 de la base restaurada.
+# Verifica, en este orden: HMAC-SHA256 del archivo cifrado (ANTES de
+# descifrar; SEC-09), sha256, descifrado, que el contenido tenga solo las
+# partes esperadas, sha256 de cada parte (MANIFIESTO), carga del dump,
+# cantidad de comprobantes y el sha256 de CADA PDF contra la columna
+# comprobantes.sha256 de la base restaurada.
 #
 # Uso:
 #   BACKUP_CLAVE_ARCHIVO=/etc/remiseria/backup.key deploy/backup/restore.sh archivo.tar.enc [opciones]
@@ -19,6 +21,7 @@
 #   --restaurar-comprobantes    copia los PDF al volumen de la app (solo junto con
 #                               --reemplazar-base-actual)
 #   --conservar-base            no borra la base temporal al terminar la prueba
+#   --permitir-sin-hmac         acepta backups anteriores al HMAC (sin .hmac)
 # =============================================================================
 set -Eeuo pipefail
 umask 077
@@ -36,13 +39,15 @@ ARCHIVO="${1:-}"; shift || true
 [ -n "$ARCHIVO" ] && [ -f "$ARCHIVO" ] || fallar "indicar el archivo .tar.enc a restaurar"
 [ -n "${BACKUP_CLAVE_ARCHIVO:-}" ] && [ -s "$BACKUP_CLAVE_ARCHIVO" ] || fallar "BACKUP_CLAVE_ARCHIVO no definido o vacío"
 
-BASE=""; REEMPLAZAR=0; COMPROBANTES=0; CONSERVAR=0
+BASE=""; REEMPLAZAR=0; COMPROBANTES=0; CONSERVAR=0; SIN_HMAC=0
+PYTHON="${PYTHON:-python3}"
 while [ $# -gt 0 ]; do
     case "$1" in
         --base) BASE="$2"; shift 2 ;;
         --reemplazar-base-actual) REEMPLAZAR=1; shift ;;
         --restaurar-comprobantes) COMPROBANTES=1; shift ;;
         --conservar-base) CONSERVAR=1; shift ;;
+        --permitir-sin-hmac) SIN_HMAC=1; shift ;;
         *) fallar "opción desconocida: $1" ;;
     esac
 done
@@ -63,6 +68,15 @@ else
     [ "$COMPROBANTES" = 0 ] || fallar "--restaurar-comprobantes solo junto con --reemplazar-base-actual"
 fi
 [[ "$BASE" =~ ^[A-Za-z0-9_]{1,64}$ ]] || fallar "nombre de base inválido: $BASE"
+case "$(printf %s "$BASE" | tr '[:upper:]' '[:lower:]')" in
+    mysql|sys|information_schema|performance_schema) fallar "no se restaura sobre una base del sistema: $BASE" ;;
+esac
+if [ "$REEMPLAZAR" = 0 ]; then
+    # Una prueba de restauración siempre va a una base NUEVA: nunca se
+    # mezcla con datos existentes ni se pisa otra base por error.
+    EXISTE="$("${COMPOSE[@]}" exec -T mysql sh -c "mysql -N -uroot -p\"\$MYSQL_ROOT_PASSWORD\" -e \"SELECT COUNT(*) FROM information_schema.schemata WHERE schema_name='$BASE'\"" 2>/dev/null | tr -d '\r')"
+    [ "$EXISTE" = 0 ] || fallar "la base '$BASE' ya existe: elegir otro nombre con --base"
+fi
 
 TRABAJO="$(mktemp -d)"
 BASE_CREADA=0
@@ -75,6 +89,17 @@ limpiar() {
 }
 trap limpiar EXIT
 
+# SEC-09: autenticidad del archivo cifrado ANTES de descifrarlo.
+if [ -f "$ARCHIVO.hmac" ]; then
+    log "verificando HMAC del archivo cifrado"
+    "$PYTHON" -I "$RAIZ/deploy/backup/hmac.py" verificar "$BACKUP_CLAVE_ARCHIVO" "$ARCHIVO" "$ARCHIVO.hmac" \
+        || fallar "el HMAC no coincide: el archivo fue alterado o la clave es otra"
+elif [ "$SIN_HMAC" = 1 ]; then
+    log "ADVERTENCIA: backup sin HMAC (anterior a SEC-09); se continúa por --permitir-sin-hmac"
+else
+    fallar "falta $ARCHIVO.hmac (usar --permitir-sin-hmac solo para backups anteriores a esta versión)"
+fi
+
 if [ -f "$ARCHIVO.sha256" ]; then
     log "verificando sha256 del archivo cifrado"
     ( cd "$(dirname "$ARCHIVO")" && sha256sum -c "$(basename "$ARCHIVO").sha256" >/dev/null ) || fallar "el sha256 del archivo no coincide"
@@ -83,8 +108,13 @@ else
 fi
 
 log "descifrando"
-openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass "file:$BACKUP_CLAVE_ARCHIVO" -in "$ARCHIVO" | tar -C "$TRABAJO" -xf - \
+openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass "file:$BACKUP_CLAVE_ARCHIVO" -in "$ARCHIVO" -out "$TRABAJO/backup.tar" \
     || fallar "no se pudo descifrar (¿clave incorrecta?)"
+# Solo las tres partes esperadas, sin rutas ni enlaces (defensa en profundidad).
+[ "$(tar -tf "$TRABAJO/backup.tar" | sort | tr '\n' ' ')" = "MANIFIESTO comprobantes.tar.gz db.sql.gz " ] \
+    || fallar "el contenido del backup no es el esperado"
+tar -C "$TRABAJO" --no-same-owner --no-same-permissions -xf "$TRABAJO/backup.tar" MANIFIESTO db.sql.gz comprobantes.tar.gz
+rm -f "$TRABAJO/backup.tar"
 # sha256sum escribe "hash  archivo" (Linux) o "hash *archivo" (modo binario):
 # se aceptan ambos y se exige que estén las dos partes.
 ( cd "$TRABAJO" && [ "$(grep -cE '^[0-9a-f]{64} [ *]' MANIFIESTO)" = 2 ] && grep -E '^[0-9a-f]{64} [ *]' MANIFIESTO | sha256sum -c - >/dev/null ) \
@@ -106,10 +136,14 @@ log "tablas restauradas: $(consulta "SELECT COUNT(*) FROM information_schema.tab
 
 log "verificando el sha256 de cada comprobante contra la base"
 mkdir -p "$TRABAJO/pdf"
-tar -C "$TRABAJO/pdf" -xzf "$TRABAJO/comprobantes.tar.gz"
+# Solo PDF dentro de comprobantes/AAAA/MM/ (nada fuera de ese árbol).
+tar -tzf "$TRABAJO/comprobantes.tar.gz" | grep -vE '^comprobantes/([0-9]{4}/([0-9]{2}/([A-Za-z0-9_-]+\.pdf)?)?)?$' \
+    && fallar "el paquete de comprobantes contiene rutas no esperadas"
+tar -C "$TRABAJO/pdf" --no-same-owner --no-same-permissions -xzf "$TRABAJO/comprobantes.tar.gz"
 ERRORES=0
 while IFS=$'\t' read -r RUTA HASH; do
     [ -n "$RUTA" ] || continue
+    [[ "$RUTA" =~ ^[0-9]{4}/[0-9]{2}/[A-Za-z0-9_-]+\.pdf$ ]] || { log "  ruta inválida en la base: $RUTA"; ERRORES=$((ERRORES + 1)); continue; }
     ARCHIVO_PDF="$TRABAJO/pdf/comprobantes/$RUTA"
     if [ ! -f "$ARCHIVO_PDF" ]; then
         log "  falta: $RUTA"; ERRORES=$((ERRORES + 1)); continue
