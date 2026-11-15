@@ -34,7 +34,14 @@ final class OsrmProveedorDistancia extends ProveedorHttp
             $origen->lng, $origen->lat, $destino->lng, $destino->lat,
         );
 
-        $json = $this->exigirExito($http->get($url, ['overview' => 'false']))->json();
+        $respuesta = $http->get($url, ['overview' => 'false']);
+
+        // OSRM responde NoRoute (HTTP 400) cuando no hay recorrido posible.
+        if ($respuesta->json('code') === 'NoRoute') {
+            throw new RutaInexistente('OSRM no encontró un recorrido por calles entre los puntos.');
+        }
+
+        $json = $this->exigirExito($respuesta)->json();
 
         if (($json['code'] ?? null) !== 'Ok' || ! isset($json['routes'][0])) {
             throw new ServicioMapasNoDisponible('OSRM no encontró una ruta entre los puntos.');
