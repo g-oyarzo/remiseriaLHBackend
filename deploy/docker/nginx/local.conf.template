@@ -29,10 +29,34 @@ upstream reverb {
     server reverb:8080;
 }
 
+# Salud de NGINX para el healthcheck del contenedor: solo escucha en el
+# loopback del contenedor, sin depender del dominio público.
+server {
+    listen 127.0.0.1:8081;
+    server_name _;
+    access_log off;
+    location = /nginx-salud {
+        return 200 "ok";
+    }
+    location / {
+        return 404;
+    }
+}
+
+# Seguridad (SEC-07): hosts desconocidos se descartan sin respuesta. Así el
+# encabezado Host que llega a Laravel siempre es SERVER_NAME.
+server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+    server_name _;
+    return 444;
+}
+
 server {
     listen 80;
     listen [::]:80;
-    server_name ${SERVER_NAME};
+    # "nginx": la prueba de carga entra por la red de Docker con ese Host.
+    server_name ${SERVER_NAME} nginx;
 
 
     server_tokens off;
@@ -41,7 +65,10 @@ server {
     add_header X-Content-Type-Options "nosniff" always;
     add_header X-Frame-Options "DENY" always;
     add_header Referrer-Policy "no-referrer" always;
-    add_header Content-Security-Policy "default-src 'none'; frame-ancestors 'none'" always;
+    add_header Content-Security-Policy "default-src 'none'; frame-ancestors 'none'; form-action 'none'; base-uri 'none'" always;
+    add_header Permissions-Policy "geolocation=(), camera=(), microphone=(), payment=()" always;
+    add_header Cross-Origin-Opener-Policy "same-origin" always;
+    add_header Cross-Origin-Resource-Policy "same-site" always;
 
     root /var/www/html/public;
     index index.php;
@@ -52,8 +79,14 @@ server {
         return 404;
     }
 
-    # WebSockets de Reverb (protocolo Pusher: /app/{key} y /apps/{id}/...).
-    location ~ ^/(app|apps)/ {
+    # WebSockets de Reverb (protocolo Pusher: /app/{key}). La API HTTP de
+    # publicación de Reverb (/apps/{id}/...) NO se expone (SEC-10): el backend
+    # publica por la red interna (REVERB_HOST=reverb).
+    location ^~ /apps/ {
+        return 404;
+    }
+
+    location ^~ /app/ {
         proxy_pass http://reverb;
         proxy_http_version 1.1;
         proxy_set_header Host $host;

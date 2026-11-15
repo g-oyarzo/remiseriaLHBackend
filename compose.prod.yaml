@@ -38,6 +38,12 @@ x-app: &app
     - interna
   restart: unless-stopped
   logging: *logging
+  # SEC-13: los procesos PHP corren como www-data y no necesitan ninguna
+  # capacidad de Linux ni pueden ganar privilegios (setuid).
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
   depends_on:
     mysql:
       condition: service_healthy
@@ -69,6 +75,8 @@ services:
       - interna
     restart: unless-stopped
     logging: *logging
+    security_opt:
+      - no-new-privileges:true
     mem_limit: 256m
     depends_on:
       app:
@@ -135,6 +143,8 @@ services:
       - interna
     restart: unless-stopped
     logging: *logging
+    security_opt:
+      - no-new-privileges:true
     mem_limit: 4g
 
   redis:
@@ -163,6 +173,8 @@ services:
       - interna
     restart: unless-stopped
     logging: *logging
+    security_opt:
+      - no-new-privileges:true
     mem_limit: 1g
 
   # Renovación de certificados TLS (Let's Encrypt). Solo con --profile tls.
@@ -175,6 +187,8 @@ services:
     entrypoint: ["/bin/sh", "-c", "trap exit TERM; while :; do certbot renew --webroot -w /var/www/certbot --quiet; sleep 12h & wait $${!}; done"]
     restart: unless-stopped
     logging: *logging
+    security_opt:
+      - no-new-privileges:true
 
   # OSRM propio: alternativa FUTURA, desactivada. No ejecutar en la VM
   # gratuita (preprocesar Argentina requiere decenas de GB de RAM/disco).
