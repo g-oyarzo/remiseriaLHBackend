@@ -62,7 +62,7 @@ Relevamiento hecho sobre `develop` (`6eccd2d`) y trabajo de la rama `feature/bac
 | 1 | Cuenta corriente corporativa | No existe: todo se cobra al momento del viaje. | Sin cambios: el commit `94682ac` ya la había eliminado. |
 | 2 | Qué paga el pasajero | Siempre lo cotizado, como precio cerrado. El precio puede variar según la demanda y el clima. | `costo_final = costo` (`cotizado`); cotizaciones con `cotizacion_id` y vigencia de 5 min; recargo dinámico por demanda y lluvia configurable por tarifa (0 % por defecto). |
 | 3 | Zonas de contingencia | Bandas de distancia en línea recta con monto fijo. | Sin cambios. |
-| 4 | Proveedor de mapas | Se evalúa un OSRM propio; queda para el final. | El driver OSRM ya existe (`MAPAS_DRIVER=osrm`, `MAPAS_OSRM_URL`). Pendiente: definir dónde y cómo se aloja. |
+| 4 | Proveedor de mapas | Sin presupuesto para alojar mapas: empezar con un servicio externo gratuito; OSRM queda como alternativa futura (2026-11-15). | openrouteservice Standard (`MAPAS_DRIVER=ors`) con cuotas locales, circuit breaker y contingencia; Google Routes y OSRM se mantienen como drivers. Ver [ARQUITECTURA_Y_COSTOS.md](ARQUITECTURA_Y_COSTOS.md). |
 | 5 | Pagos digitales | Integrar un proveedor (Mercado Pago) con confirmación automática por webhooks. | Checkout Pro + webhook firmado + conciliación automática cada 10 minutos. |
 | 6 | Facturación electrónica | Por ahora, comprobante interno; la administración ve y descarga el registro, sin modificarlo ni borrarlo. | Tabla `comprobantes` inmutable, archivo con SHA-256 y endpoints de solo lectura. |
 | 7 | Parámetros operativos | Oferta de 30 s; radio de 10 km con expansión si no hay conductores; reservas entre 60 min y 30 días; pesos: distancia, calificación, antigüedad y carga del día; si nadie acepta se avisa al admin y el viaje no se cancela solo. | Valores por defecto en `config/remiseria.php`; expansión de 2,5 km por reintento hasta 20 km. |
@@ -73,7 +73,9 @@ Otros criterios vigentes: un conductor sin GPS reciente no recibe ofertas autom�
 
 - **Mercado Pago:** cargar credenciales de prueba y validar en el sandbox el flujo completo, en especial **la firma del webhook** (el formato se implementó según la documentación oficial, pero no se pudo probar contra notificaciones reales) y que las notificaciones lleguen con la `notification_url` de la preferencia. Después, credenciales productivas.
 - **Clima:** la API pública de Open-Meteo es solo para uso no comercial. Para usar el recargo por lluvia en producción hay que contratar un plan (`CLIMA_OPENMETEO_URL` y `CLIMA_OPENMETEO_API_KEY`) o dejar `CLIMA_DRIVER=ninguno`.
-- **Mapas (decisión 4):** servidor OSRM propio o credenciales de Google Routes para producción.
+- **Mapas:** clave de openrouteservice y validación de rutas reales (`mapas:estado --probar`); para la operación completa, Google Routes con facturación u OSRM propio.
 - Facturación electrónica (AFIP): fuera del alcance actual.
 - Adaptación de los frontends ([cambios-para-frontend.md](cambios-para-frontend.md)).
-- Pruebas de carga (RNF01: 200 conductores simultáneos) y pruebas con Reverb y Redis reales en un entorno de staging.
+- Pruebas de carga **en la VM de Oracle** o una equivalente. En local, con `compose.prod.yaml`, Reverb y Redis reales, se midieron 200 conductores sin errores ([deploy/carga/README.md](../deploy/carga/README.md)).
+- Despliegue en Oracle Cloud ([DESPLIEGUE_ORACLE_CLOUD.md](DESPLIEGUE_ORACLE_CLOUD.md)) y backups contra Object Storage real.
+- Cobros automáticos sin CVV: habilitación comercial de Mercado Pago.
