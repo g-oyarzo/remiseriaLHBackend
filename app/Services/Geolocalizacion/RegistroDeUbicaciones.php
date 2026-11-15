@@ -64,7 +64,9 @@ final class RegistroDeUbicaciones
             ]);
         }
 
-        UbicacionConductorActualizada::dispatch($conductor->persona_id, $coordenada, $viajeActivo?->id, $ahora->toIso8601String());
+        // ISO 8601 con milisegundos: permite medir la latencia de punta a
+        // punta del seguimiento (RNF02, deploy/carga).
+        UbicacionConductorActualizada::dispatch($conductor->persona_id, $coordenada, $viajeActivo?->id, $ahora->format('Y-m-d\TH:i:s.vP'));
 
         return $nueva;
     }
