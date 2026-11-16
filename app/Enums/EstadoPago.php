@@ -14,7 +14,7 @@ use OpenApi\Attributes as OA;
 #[OA\Schema(
     schema: 'EstadoPagoEnum',
     type: 'string',
-    enum: ['pendiente', 'confirmado', 'rechazado'],
+    enum: ['pendiente', 'confirmado', 'rechazado', 'reintegrado'],
     example: 'confirmado',
 )]
 enum EstadoPago: string
@@ -22,6 +22,8 @@ enum EstadoPago: string
     case Pendiente = 'pendiente';
     case Confirmado = 'confirmado';
     case Rechazado = 'rechazado';
+    // Cobro confirmado que el proveedor devolvió (reintegro o contracargo).
+    case Reintegrado = 'reintegrado';
 
     public function label(): string
     {
@@ -29,6 +31,7 @@ enum EstadoPago: string
             self::Pendiente => 'Pendiente',
             self::Confirmado => 'Confirmado',
             self::Rechazado => 'Rechazado',
+            self::Reintegrado => 'Reintegrado',
         };
     }
 }

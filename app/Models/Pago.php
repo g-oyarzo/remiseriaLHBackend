@@ -6,11 +6,14 @@ namespace App\Models;
 
 use App\Enums\EstadoPago;
 use App\Enums\MetodoPago;
+use App\Events\PagoActualizado;
+use App\Events\PagoConfirmado;
 use Database\Factories\PagoFactory;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class Pago extends Model
 {
@@ -19,12 +22,44 @@ class Pago extends Model
 
     protected $table = 'pagos';
 
+    /**
+     * Cada vez que un pago se crea o cambia de estado se difunde
+     * PagoActualizado en el canal del viaje; si pasa a "confirmado", por
+     * cualquier vía, se emite además PagoConfirmado (después del commit)
+     * para emitir el comprobante.
+     */
+    protected static function booted(): void
+    {
+        static::saved(function (self $pago): void {
+            if (! $pago->wasRecentlyCreated && ! $pago->wasChanged('estado')) {
+                return;
+            }
+
+            PagoActualizado::dispatch($pago->viaje_id, $pago->id, $pago->estado);
+
+            if ($pago->estado === EstadoPago::Confirmado) {
+                PagoConfirmado::dispatch($pago->id);
+            }
+        });
+    }
+
     /** @var list<string> */
     protected $fillable = [
         'viaje_id',
         'metodo_pago',
         'monto',
+        'referencia_externa',
+        'proveedor',
+        'preferencia_id',
+        'enlace_pago',
+        'preferencia_expira_en',
+        'mp_orden_id',
         'estado',
+        'registrado_por_persona_id',
+        'conciliado_por_persona_id',
+        'conciliado_en',
+        'observacion',
+        'historial',
         'fecha_pago',
     ];
 
@@ -38,12 +73,66 @@ class Pago extends Model
             'estado' => EstadoPago::class,
             'monto' => 'decimal:2',
             'fecha_pago' => 'datetime',
+            'conciliado_en' => 'datetime',
+            'preferencia_expira_en' => 'datetime',
+            'historial' => 'array',
         ];
     }
 
     public function viaje(): BelongsTo
     {
         return $this->belongsTo(Viaje::class);
+    }
+
+    public function comprobante(): HasOne
+    {
+        return $this->hasOne(Comprobante::class);
+    }
+
+    /**
+     * Vista del pago para el pasajero y el conductor (SEC-03). Excluye el
+     * historial de auditoría (personas que registraron o conciliaron,
+     * identificadores y detalles de Mercado Pago), la observación del
+     * administrador y los identificadores internos de preferencia y orden.
+     * La vista completa (toArray) es solo para administradores.
+     *
+     * @return array<string, mixed>
+     */
+    public function vistaPublica(): array
+    {
+        return [
+            'id' => $this->id,
+            'viaje_id' => $this->viaje_id,
+            'metodo_pago' => $this->metodo_pago?->value,
+            'monto' => $this->monto !== null ? (string) $this->monto : null,
+            'estado' => $this->estado?->value,
+            'referencia_externa' => $this->referencia_externa,
+            'proveedor' => $this->proveedor,
+            'enlace_pago' => $this->enlace_pago,
+            'preferencia_expira_en' => $this->preferencia_expira_en?->toIso8601String(),
+            'fecha_pago' => $this->fecha_pago?->toIso8601String(),
+            'created_at' => $this->created_at?->toIso8601String(),
+            'updated_at' => $this->updated_at?->toIso8601String(),
+        ];
+    }
+
+    /**
+     * Agrega una entrada al historial de transiciones del pago.
+     */
+    public function registrarEnHistorial(string $accion, ?int $personaId, array $extra = []): void
+    {
+        $historial = $this->historial ?? [];
+        $historial[] = [
+            'accion' => $accion,
+            'estado' => $this->estado?->value,
+            'metodo_pago' => $this->metodo_pago?->value,
+            'monto' => $this->monto !== null ? (string) $this->monto : null,
+            'referencia_externa' => $this->referencia_externa,
+            'persona_id' => $personaId,
+            'en' => now()->toIso8601String(),
+        ] + $extra;
+
+        $this->historial = $historial;
     }
 
     /**

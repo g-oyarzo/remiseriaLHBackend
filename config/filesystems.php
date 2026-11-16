@@ -38,6 +38,17 @@ return [
             'report' => false,
         ],
 
+        // Comprobantes internos emitidos: privados, nunca servidos por URL
+        // pública (se entregan por la API con autorización). Debe incluirse
+        // en los backups.
+        'comprobantes' => [
+            'driver' => 'local',
+            'root' => storage_path('app/private/comprobantes'),
+            'serve' => false,
+            'throw' => true,
+            'report' => false,
+        ],
+
         'public' => [
             'driver' => 'local',
             'root' => storage_path('app/public'),

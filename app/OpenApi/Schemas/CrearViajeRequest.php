@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\OpenApi\Schemas;
 
+use App\Enums\MetodoPago;
 use App\Enums\TipoViaje;
 use OpenApi\Attributes as OA;
 
@@ -20,7 +21,8 @@ use OpenApi\Attributes as OA;
         new OA\Property(property: 'origen_calle', type: 'string', maxLength: 100, nullable: true, example: 'Calle 7'),
         new OA\Property(property: 'origen_numero', type: 'string', maxLength: 15, nullable: true, example: '800'),
         new OA\Property(property: 'tipo', ref: TipoViaje::class, description: 'Por defecto "actual" si se omite.'),
-        new OA\Property(property: 'fecha_viaje', type: 'string', format: 'date-time', description: 'Requerida (>= ahora) solo si tipo = "programado".', example: '2026-09-02T09:00:00-03:00'),
+        new OA\Property(property: 'fecha_viaje', type: 'string', format: 'date-time', description: 'Requerida solo si tipo = "programado"; debe respetar la anticipación mínima y máxima de reservas.', example: '2026-09-02T09:00:00-03:00'),
+        new OA\Property(property: 'metodo_pago', ref: MetodoPago::class, description: 'Por defecto "efectivo" si se omite (compatibilidad).'),
     ],
 )]
 final class CrearViajeRequest

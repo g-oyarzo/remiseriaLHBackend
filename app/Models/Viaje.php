@@ -6,6 +6,8 @@ namespace App\Models;
 
 use App\Casts\PointCast;
 use App\Enums\EstadoViaje;
+use App\Enums\MetodoCotizacion;
+use App\Enums\MetodoPago;
 use App\Enums\TipoViaje;
 use App\Events\ViajeCambioEstado;
 use Database\Factories\ViajeFactory;
@@ -33,7 +35,7 @@ class Viaje extends Model
     {
         static::updated(function (self $viaje): void {
             if ($viaje->wasChanged('estado')) {
-                event(new ViajeCambioEstado($viaje->id, $viaje->estado));
+                event(new ViajeCambioEstado($viaje->id, $viaje->estado, $viaje->conductor_id));
             }
         });
     }
@@ -49,11 +51,37 @@ class Viaje extends Model
         'origen_localidad',
         'origen_calle',
         'origen_numero',
+        'destino_localidad',
+        'destino_calle',
+        'destino_numero',
         'estado',
         'tipo',
+        'metodo_pago',
+        'canal',
+        'registrado_por_persona_id',
         'costo',
+        'monto_base_cotizado',
+        'recargo_dinamico_pct',
+        'recargo_dinamico_detalle',
+        'precio_base_aplicado',
+        'precio_por_km_aplicado',
+        'distancia_estimada_km',
+        'duracion_estimada_min',
+        'metodo_cotizacion',
+        'zona_tarifaria_id',
         'calificacion',
         'fecha_viaje',
+        'despachado_en',
+        'busqueda_agotada_en',
+        'iniciado_en',
+        'distancia_recorrida_metros',
+        'puntos_seguimiento',
+        'finalizado_en',
+        'distancia_final_km',
+        'duracion_final_min',
+        'costo_final',
+        'costo_final_origen',
+        'distancia_al_destino_metros',
     ];
 
     /**
@@ -66,9 +94,28 @@ class Viaje extends Model
             'destino' => PointCast::class,
             'estado' => EstadoViaje::class,
             'tipo' => TipoViaje::class,
+            'metodo_pago' => MetodoPago::class,
             'costo' => 'decimal:2',
+            'monto_base_cotizado' => 'decimal:2',
+            'recargo_dinamico_pct' => 'decimal:2',
+            'recargo_dinamico_detalle' => 'array',
+            'precio_base_aplicado' => 'decimal:2',
+            'precio_por_km_aplicado' => 'decimal:2',
+            'distancia_estimada_km' => 'float',
+            'duracion_estimada_min' => 'integer',
+            'metodo_cotizacion' => MetodoCotizacion::class,
             'calificacion' => 'integer',
             'fecha_viaje' => 'datetime',
+            'despachado_en' => 'datetime',
+            'busqueda_agotada_en' => 'datetime',
+            'iniciado_en' => 'datetime',
+            'distancia_recorrida_metros' => 'integer',
+            'puntos_seguimiento' => 'integer',
+            'finalizado_en' => 'datetime',
+            'distancia_final_km' => 'float',
+            'duracion_final_min' => 'integer',
+            'costo_final' => 'decimal:2',
+            'distancia_al_destino_metros' => 'integer',
         ];
     }
 
@@ -92,6 +139,11 @@ class Viaje extends Model
         return $this->belongsTo(Tarifa::class);
     }
 
+    public function zonaTarifaria(): BelongsTo
+    {
+        return $this->belongsTo(ZonaTarifaria::class);
+    }
+
     public function pago(): HasOne
     {
         return $this->hasOne(Pago::class);
@@ -102,6 +154,11 @@ class Viaje extends Model
         return $this->hasMany(Mensaje::class);
     }
 
+    public function asignaciones(): HasMany
+    {
+        return $this->hasMany(AsignacionViaje::class);
+    }
+
     /**
      * @param  Builder<Viaje>  $query
      * @return Builder<Viaje>
@@ -109,36 +166,6 @@ class Viaje extends Model
     public function scopePendientes(Builder $query): Builder
     {
         return $query->where('estado', EstadoViaje::Solicitado);
-    }
-
-    /**
-     * Viajes "solicitado" que un conductor debería poder ver y tomar ahora
-     * mismo (ViajeController::pendientes()): los inmediatos siempre, y los
-     * programados recién a partir de que entran en la ventana de despacho
-     * configurada (ver config('remiseria.ventana_despacho_programados_minutos')
-     * y App\Console\Commands\DespacharViajesProgramadosCommand).
-     *
-     * Corrección de auditoría (HALL-006): antes scopePendientes() no hacía
-     * ninguna distinción por tipo/fecha, así que un viaje programado para
-     * dentro de varios días ya aparecía como "pendiente" desde el momento
-     * en que se solicitaba, pudiendo ser aceptado por un conductor mucho
-     * antes de tiempo.
-     *
-     * @param  Builder<Viaje>  $query
-     * @return Builder<Viaje>
-     */
-    public function scopeListosParaDespacho(Builder $query): Builder
-    {
-        $limite = now()->addMinutes((int) config('remiseria.ventana_despacho_programados_minutos'));
-
-        return $query->pendientes()
-            ->where(function (Builder $query) use ($limite): void {
-                $query->where('tipo', TipoViaje::Actual)
-                    ->orWhere(function (Builder $query) use ($limite): void {
-                        $query->where('tipo', TipoViaje::Programado)
-                            ->where('fecha_viaje', '<=', $limite);
-                    });
-            });
     }
 
     /**

@@ -1,61 +1,80 @@
-# Ejecución de Tests — Remisería LH (Backend)
+# Ejecución de tests — Remisería LH (Backend)
 
-La suite de pruebas automatizadas valida la seguridad, integridad de base de datos, emisiones en tiempo real y flujos de negocio del proyecto.
+## Requisitos
 
-## ⚠️ Requisitos Previos (Muy Importante)
+La suite **requiere MySQL 8** (columnas `POINT` SRID 4326, `ST_Distance_Sphere`, columnas generadas e índices espaciales). SQLite no sirve.
 
-A diferencia de muchos proyectos Laravel que pueden usar **SQLite en memoria** para correr pruebas, este proyecto **requiere obligatoriamente un motor MySQL**. 
+`phpunit.xml` fija todo lo demás para que los tests sean reproducibles y no dependan del `.env` local: `APP_KEY` y credenciales de Reverb de prueba, cache en memoria, cola `sync`, difusiones descartadas (`DIFUSION_CONEXION_COLA=descartar`), servicio de mapas desactivado (`MAPAS_DRIVER=ninguno`) y último ping GPS en memoria (`UBICACION_CACHE_STORE=array`). **Ningún test llama a servicios externos** (mapas o Reverb): se usan `Http::fake` y dobles.
 
-El motivo de esto es que el sistema requiere soporte para **Índices y Funciones Geoespaciales** (como `ST_GeomFromText`) para cumplir con los requerimientos no funcionales (RNF02) de rastreo GPS en tiempo real de los conductores y registro de viajes (coordenadas de origen y destino). SQLite estándar no soporta de forma nativa estas características espaciales sin extensiones (Spatialite).
+La base es `remiserialh_testing`, que el script de Sail crea al levantar el contenedor de MySQL.
 
-El archivo `phpunit.xml` está pre-configurado para conectarse al servicio MySQL del contenedor Docker (`DB_HOST=mysql`) y a la base de datos `remiserialh_testing`, que es creada automáticamente por el script de inicialización de Sail al levantar los contenedores.
+## Cómo ejecutarlos
 
----
-
-## 🚀 Cómo ejecutar los tests
-
-Los contenedores Docker deben estar levantados antes de correr los tests:
+### Con Docker (Sail)
 
 ```bash
 docker compose up -d
+docker exec remiserialhbackend-laravel.test-1 php artisan test    # Windows sin WSL
+./vendor/bin/sail test                                            # Linux, macOS o WSL2
 ```
 
-### En Windows (sin WSL2) — Método recomendado
-
-Ya que el hostname `mysql` solo es resolvible dentro de la red Docker, los tests deben ejecutarse **dentro del contenedor** de la aplicación Laravel:
+### Nativo, contra cualquier MySQL de pruebas
 
 ```bash
-docker exec remiserialhbackend-laravel.test-1 php artisan test
+DB_HOST=127.0.0.1 DB_PORT=3306 vendor/bin/phpunit
 ```
 
-### En Linux / macOS / Windows con WSL2 — usando Laravel Sail
+`vendor/bin/phpunit` corre aun sin `.env`. `php artisan test` arranca la aplicación antes de leer `phpunit.xml`, por lo que necesita un `.env` válido. **Nunca apuntes `DB_*` a una base con datos reales**: los tests la vacían.
+
+Para un MySQL efímero:
 
 ```bash
-./vendor/bin/sail test
+docker run -d --name rlh-test-mysql -e MYSQL_ROOT_PASSWORD=password -e MYSQL_DATABASE=remiserialh_testing -p 127.0.0.1:33306:3306 mysql:8.4
+DB_HOST=127.0.0.1 DB_PORT=33306 vendor/bin/phpunit
 ```
 
----
+## Cobertura
 
-## 🗂️ Suites de Pruebas Implementadas
+El PHP local no suele traer Xdebug ni PCOV. Con Docker:
 
-Las pruebas se dividen en diferentes características bajo el directorio `tests/Feature/`:
+```dockerfile
+# Dockerfile (fuera del repo)
+FROM php:8.5-cli
+RUN apt-get update && apt-get install -y --no-install-recommends libzip-dev unzip \
+ && docker-php-ext-install pdo_mysql zip bcmath \
+ && pecl install pcov && docker-php-ext-enable pcov
+```
 
-1. **`Database\MigrationTest`**: Verifica que las tablas requeridas por el diagrama relacional, así como las claves foráneas, existan y estén estructuradas sin problemas.
-2. **`Auth\LoginTest` y `Auth\AuthorizationTest`**: Garantiza la generación de tokens vía Sanctum y comprueba rigurosamente que el middleware Role-Based Access Control (RBAC) impida a clientes acceder a rutas de administrador o conductor, y viceversa.
-3. **`Broadcasting\BroadcastingTest`**: Emula y valida el servicio de WebSockets (Reverb). Verifica la correcta autorización de canales privados basados en la titularidad de los viajes, y que los eventos de dominio (`UbicacionConductorActualizada`, `NuevoMensajeViaje`) sean empujados a los canales designados tras las peticiones HTTP correspondientes.
-4. **`Api\ViajeTest`**: Simula todo el ciclo de vida, cubriendo validaciones donde un cliente solicita un viaje con coordenadas espaciales, y un conductor acepta el servicio.
+```bash
+docker build -t rlh-coverage .
+docker run --rm --network container:rlh-test-mysql -v "$PWD:/app" -w /app \
+  -e DB_HOST=127.0.0.1 -e DB_PORT=3306 rlh-coverage \
+  php -d pcov.enabled=1 -d pcov.directory=/app/app vendor/bin/phpunit --coverage-text
+```
 
----
+Medición del 2026-11-04 (363 tests): **`app/Services` 96,39 %** de líneas; `app/Services/Pagos` 94,22 %; `app/` completo 87,63 %.
 
-## 💡 Consejos Útiles
+## Suites
 
-- **Ejecutar una prueba o archivo en específico:**
-  Si solo querés correr los tests de WebSockets:
-  ```bash
-  php artisan test --filter BroadcastingTest
-  ```
-- **Ver reportes detallados:**
-  Para ver la información de completitud y los tests que más tiempo demoran:
-  ```bash
-  php artisan test --profile
-  ```
+| Carpeta | Qué cubre |
+|---|---|
+| `tests/Unit` | Dinero en centavos, generador PDF, generador XLSX. |
+| `tests/Feature/Auth` | Login, registro (anti-enumeración), roles. |
+| `tests/Feature/Seguridad` | Exposición de datos personales, permisos del chat, revocación de acceso, límites de frecuencia y paginación. |
+| `tests/Feature/Api` | Tarifas, cotización y cotizaciones emitidas (precio cerrado), solicitudes y reservas, registro telefónico, estados, finalización con geocerca, pagos, Mercado Pago (con `Http::fake`: firma, verificación contra la API, idempotencia, anomalías, reintegros, conciliación), comprobantes y su registro, reportes, conductores y vehículos. |
+| `tests/Feature/Cotizacion` | Fórmula, redondeo, contingencia por zonas, recargo dinámico por demanda y lluvia, proveedores OSRM, Google y openrouteservice (respuestas válidas, errores, timeouts, reintentos, caché), cuota local, circuit breaker con recuperación y rechazo de trayectos sin recorrido por calles. |
+| `tests/Feature/Asignacion` | Selección de candidatos, ofertas, aceptar, rechazar, vencimiento, agotamiento y restricciones de la base. |
+| `tests/Feature/Geolocalizacion` | Pings, Redis con respaldo en MySQL, saltos imposibles, seguimiento del recorrido. |
+| `tests/Feature/Concurrencia` | Bloqueos de fila con dos conexiones MySQL reales (pagos, ofertas, cancelación, tarifas). |
+| `tests/Feature/Console` | Despacho de reservas, importación legacy, `mapas:estado`, `carga:preparar`. |
+| `tests/Feature/Broadcasting` | Autorización de canales y eventos. |
+| `tests/Feature/Database` | Tablas esenciales, orden de ejes de las coordenadas y caché serializada (regresión: objetos en caché con `serializable_classes=false`). |
+
+`tests/Feature/Api/MercadoPagoTarjetasYSeguridadTest.php` cubre la ventana temporal y las repeticiones del webhook, el reintegro de cobros no aplicados, las tarjetas guardadas (vincular, consentimiento, límite, predeterminada, desvincular, IDOR), el pago con tarjeta guardada (aprobado, rechazado, token inválido, cobro simultáneo, vencimiento del enlace), el cobro automático por órdenes y la conciliación de órdenes. **Todas las respuestas de Mercado Pago son simuladas** (`Http::fake`): validan la lógica del backend, no la integración real (ver la validación en sandbox en [seguridad-y-despliegue.md](seguridad-y-despliegue.md#validación-de-mercado-pago-en-sandbox)).
+
+## Consejos
+
+```bash
+vendor/bin/phpunit --filter AsignacionAutomaticaTest
+php artisan test --profile
+```

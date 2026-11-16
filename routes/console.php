@@ -29,3 +29,25 @@ Schedule::command('viajes:despachar-programados')
     ->everyMinute()
     ->withoutOverlapping()
     ->onOneServer();
+
+// Red de seguridad de la asignación automática (CU 03): vence ofertas sin
+// respuesta cuyo job se haya perdido y reactiva búsquedas detenidas. Ver
+// App\Console\Commands\SupervisarDespachoCommand.
+Schedule::command('viajes:supervisar-despacho')
+    ->everyMinute()
+    ->withoutOverlapping()
+    ->onOneServer();
+
+// Concilia contra la API de Mercado Pago los cobros pendientes cuyo webhook
+// se haya perdido (App\Console\Commands\ConciliarMercadoPagoCommand). Sin
+// MERCADOPAGO_ACCESS_TOKEN no hace nada.
+Schedule::command('pagos:conciliar-mercadopago')
+    ->everyTenMinutes()
+    ->withoutOverlapping()
+    ->onOneServer();
+
+// Elimina las cotizaciones emitidas vencidas hace más de una semana
+// (App\Models\CotizacionEmitida::prunable()).
+Schedule::command('model:prune', ['--model' => [App\Models\CotizacionEmitida::class]])
+    ->daily()
+    ->onOneServer();

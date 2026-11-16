@@ -2,14 +2,22 @@
 
 use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\ClienteController;
+use App\Http\Controllers\Api\V1\ComprobanteController;
 use App\Http\Controllers\Api\V1\ConductorController;
+use App\Http\Controllers\Api\V1\CotizacionController;
 use App\Http\Controllers\Api\V1\MarcaController;
+use App\Http\Controllers\Api\V1\MedioPagoController;
 use App\Http\Controllers\Api\V1\MensajeController;
+use App\Http\Controllers\Api\V1\MercadoPagoWebhookController;
 use App\Http\Controllers\Api\V1\PagoController;
+use App\Http\Controllers\Api\V1\RegistroComprobantesController;
+use App\Http\Controllers\Api\V1\ReporteController;
+use App\Http\Controllers\Api\V1\SolicitudViajeController;
 use App\Http\Controllers\Api\V1\TarifaController;
 use App\Http\Controllers\Api\V1\UbicacionController;
 use App\Http\Controllers\Api\V1\VehiculoController;
 use App\Http\Controllers\Api\V1\ViajeController;
+use App\Http\Controllers\Api\V1\ZonaTarifariaController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -27,6 +35,10 @@ Route::middleware('throttle:6,1')->group(function () {
     Route::post('/auth/register', [AuthController::class, 'register']);
 });
 
+// Webhook de Mercado Pago: público, autenticado por la firma x-signature
+// (ver MercadoPagoWebhookController).
+Route::post('/webhooks/mercadopago', MercadoPagoWebhookController::class)->middleware('throttle:webhooks');
+
 // Rutas Autenticadas (cualquier rol)
 Route::middleware('auth:sanctum')->group(function () {
     Route::post('/auth/logout', [AuthController::class, 'logout']);
@@ -35,33 +47,53 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::get('/marcas', [MarcaController::class, 'index']);
     Route::get('/tarifas/vigente', [TarifaController::class, 'vigente']);
-    
+
     // Viajes (comunes)
     Route::get('/viajes', [ViajeController::class, 'index']);
     Route::get('/viajes/{viaje}', [ViajeController::class, 'show']);
     Route::patch('/viajes/{viaje}/cancelar', [ViajeController::class, 'cancelar']);
-    
+    Route::get('/viajes/{viaje}/comprobante', [ComprobanteController::class, 'show']);
+    Route::post('/viajes/{viaje}/pago/mercadopago', [PagoController::class, 'mercadoPago'])->middleware('throttle:pagos');
+    Route::get('/pagos/mercadopago/configuracion', [MedioPagoController::class, 'configuracion']);
+
     // Mensajes
     Route::get('/viajes/{viaje}/mensajes', [MensajeController::class, 'index']);
-    Route::post('/viajes/{viaje}/mensajes', [MensajeController::class, 'store']);
+    Route::post('/viajes/{viaje}/mensajes', [MensajeController::class, 'store'])->middleware('throttle:chat');
     Route::patch('/viajes/{viaje}/mensajes/marcar-leidos', [MensajeController::class, 'marcarLeidos']);
 });
 
+// Cotización (CU 02): apps de clientes y panel administrativo. Tiene su
+// propio límite porque cada llamada puede consumir cuota del servicio de
+// mapas.
+Route::middleware(['auth:sanctum', 'role:cliente,administrador', 'throttle:cotizar'])
+    ->post('/viajes/cotizar', [CotizacionController::class, 'cotizar']);
+
 // Rutas Cliente
 Route::middleware(['auth:sanctum', 'role:cliente'])->prefix('cliente')->group(function () {
-    Route::post('/viajes', [ViajeController::class, 'store']);
+    Route::post('/viajes', [ViajeController::class, 'store'])->middleware('throttle:viajes');
+    Route::post('/viajes/solicitar', [SolicitudViajeController::class, 'solicitar'])->middleware('throttle:viajes');
+    Route::post('/viajes/reservar', [SolicitudViajeController::class, 'reservar'])->middleware('throttle:viajes');
     Route::patch('/viajes/{viaje}/calificar', [ViajeController::class, 'calificar']);
+
+    // Tarjetas guardadas (Mercado Pago) y pago con tarjeta guardada.
+    Route::get('/medios-pago', [MedioPagoController::class, 'index']);
+    Route::post('/medios-pago', [MedioPagoController::class, 'store'])->middleware('throttle:pagos');
+    Route::patch('/medios-pago/{medio}/predeterminado', [MedioPagoController::class, 'predeterminado'])->whereNumber('medio');
+    Route::delete('/medios-pago/{medio}', [MedioPagoController::class, 'destroy'])->whereNumber('medio');
+    Route::post('/viajes/{viaje}/pago/tarjeta', [PagoController::class, 'tarjeta'])->middleware('throttle:pagos');
 });
 
 // Rutas Conductor
 Route::middleware(['auth:sanctum', 'role:conductor'])->prefix('conductor')->group(function () {
     Route::patch('/estado-servicio', [ConductorController::class, 'toggleServicio']);
-    Route::patch('/ubicacion', [UbicacionController::class, 'update']);
+    Route::match(['post', 'patch'], '/ubicacion', [UbicacionController::class, 'update'])->middleware('throttle:ubicacion');
 
     Route::get('/viajes/pendientes', [ViajeController::class, 'pendientes']);
-    Route::patch('/viajes/{viaje}/aceptar', [ViajeController::class, 'aceptar']);
+    // POST es el contrato de Hacer.txt; PATCH se conserva por compatibilidad.
+    Route::match(['post', 'patch'], '/viajes/{viaje}/aceptar', [ViajeController::class, 'aceptar']);
+    Route::match(['post', 'patch'], '/viajes/{viaje}/rechazar', [ViajeController::class, 'rechazar']);
     Route::patch('/viajes/{viaje}/iniciar', [ViajeController::class, 'iniciar']);
-    Route::patch('/viajes/{viaje}/finalizar', [ViajeController::class, 'finalizar']);
+    Route::match(['post', 'patch'], '/viajes/{viaje}/finalizar', [ViajeController::class, 'finalizar']);
 });
 
 // Corrección: PagoController::store() está escrito para permitir tanto al
@@ -70,7 +102,7 @@ Route::middleware(['auth:sanctum', 'role:conductor'])->prefix('conductor')->grou
 // grupo role:conductor exclusivo de arriba, así que un admin nunca podía
 // alcanzarla: el middleware lo bloqueaba con 403 antes de llegar al
 // controlador, sin importar lo que dijera su lógica interna.
-Route::middleware(['auth:sanctum', 'role:conductor,administrador'])
+Route::middleware(['auth:sanctum', 'role:conductor,administrador', 'throttle:pagos'])
     ->post('/conductor/viajes/{viaje}/pago', [PagoController::class, 'store']);
 
 // Rutas Administrador
@@ -91,8 +123,33 @@ Route::middleware(['auth:sanctum', 'role:administrador'])->prefix('admin')->grou
         // para que el binding de ConductorController ($conductor) funcione.
         ->parameters(['conductores' => 'conductor']);
     Route::patch('/conductores/{conductor}/estado', [ConductorController::class, 'actualizarEstado']);
-    Route::apiResource('/vehiculos', VehiculoController::class);
-    
+    // Sin destroy: no hay baja de vehículos en los casos de uso y borrar uno
+    // rompería el historial de viajes. Antes la ruta DELETE existía sin
+    // método en el controlador y respondía 500.
+    Route::apiResource('/vehiculos', VehiculoController::class)->only(['index', 'store', 'show', 'update']);
+
+    Route::post('/viajes/registrar', [SolicitudViajeController::class, 'registrarTelefonico']);
+    Route::post('/viajes/{viaje}/reasignar', [ViajeController::class, 'reasignar']);
+
+    Route::get('/pagos', [PagoController::class, 'index']);
+    Route::patch('/pagos/{pago}/conciliar', [PagoController::class, 'conciliar']);
+    Route::post('/pagos/{pago}/reintegrar', [PagoController::class, 'reintegrar'])->middleware('throttle:pagos');
+
+    // Registro de comprobantes: solo lectura y descarga (sin rutas de
+    // modificación ni borrado).
+    Route::get('/comprobantes', [RegistroComprobantesController::class, 'index']);
+    Route::get('/comprobantes/{comprobante}', [RegistroComprobantesController::class, 'show']);
+    Route::get('/comprobantes/{comprobante}/descargar', [RegistroComprobantesController::class, 'descargar']);
+
+    Route::get('/reportes/estadisticas', [ReporteController::class, 'estadisticas']);
+    Route::get('/reportes/exportar', [ReporteController::class, 'exportar'])->middleware('throttle:reportes');
+
     Route::get('/tarifas', [TarifaController::class, 'index']);
+    Route::put('/tarifas', [TarifaController::class, 'actualizar']);
     Route::post('/tarifas', [TarifaController::class, 'store']);
+    Route::get('/tarifas/historial', [TarifaController::class, 'historial']);
+
+    Route::apiResource('/zonas-tarifarias', ZonaTarifariaController::class)
+        ->only(['index', 'store', 'update', 'destroy'])
+        ->parameters(['zonas-tarifarias' => 'zona']);
 });

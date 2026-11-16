@@ -5,24 +5,35 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Api\V1;
 
 use App\Enums\EstadoViaje;
+use App\Enums\MetodoPago;
 use App\Enums\RolPersona;
 use App\Enums\TipoViaje;
 use App\Http\Controllers\Controller;
+use App\Http\Requests\ReservarViajeRequest;
+use App\Http\Requests\SolicitarViajeRequest;
+use App\Http\Resources\ViajeResource;
 use App\Models\Conductor;
-use App\Models\Pago;
-use App\Models\Tarifa;
 use App\Models\Viaje;
 use App\OpenApi\Schemas\CalificarViajeRequest as CalificarViajeRequestSchema;
 use App\OpenApi\Schemas\CrearViajeRequest as CrearViajeRequestSchema;
 use App\OpenApi\Schemas\ErrorResponse;
 use App\OpenApi\Schemas\PaginationMeta;
+use App\OpenApi\Schemas\ServerErrorResponse;
+use App\OpenApi\Schemas\SimpleMessageResponse;
+use App\OpenApi\Schemas\UpdateUbicacionRequest as UpdateUbicacionRequestSchema;
 use App\OpenApi\Schemas\ValidationErrorResponse;
 use App\OpenApi\Schemas\ViajeSchema;
+use App\Services\Asignacion\AsignadorConductores;
+use App\Services\Asignacion\RespuestaAsignacionInvalida;
+use App\Services\Geolocalizacion\RegistroDeUbicaciones;
+use App\Services\Geolocalizacion\UbicacionInconsistente;
+use App\Services\Viajes\FinalizacionDeViajes;
+use App\Services\Viajes\FinalizacionNoPermitida;
+use App\Services\Viajes\TransicionDeViajeInvalida;
 use App\ValueObjects\Coordinate;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Validation\Rules\Enum;
 use OpenApi\Attributes as OA;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -45,7 +56,7 @@ class ViajeController extends Controller
         parameters: [
             new OA\Parameter(name: 'estado', in: 'query', required: false, schema: new OA\Schema(ref: EstadoViaje::class)),
             new OA\Parameter(name: 'tipo', in: 'query', required: false, schema: new OA\Schema(ref: TipoViaje::class)),
-            new OA\Parameter(name: 'per_page', in: 'query', required: false, schema: new OA\Schema(type: 'integer', default: 15)),
+            new OA\Parameter(name: 'per_page', in: 'query', required: false, description: 'Entre 1 y 100.', schema: new OA\Schema(type: 'integer', default: 15, minimum: 1, maximum: 100)),
         ],
         responses: [
             new OA\Response(
@@ -89,10 +100,10 @@ class ViajeController extends Controller
         }
 
         $viajes = $query->orderByDesc('fecha_viaje')->paginate(
-            perPage: (int) $request->input('per_page', 15),
+            perPage: $this->porPagina($request),
         );
 
-        return response()->json($viajes);
+        return response()->json(ViajeResource::paginado($viajes, $request));
     }
 
     /**
@@ -110,10 +121,10 @@ class ViajeController extends Controller
         ],
         responses: [
             new OA\Response(response: 200, description: 'OK.', content: new OA\JsonContent(properties: [new OA\Property(property: 'data', ref: ViajeSchema::class)])),
-            new OA\Response(response: 401, description: 'No autenticado.', content: new OA\JsonContent(ref: \App\OpenApi\Schemas\ErrorResponse::class)),
-            new OA\Response(response: 403, description: 'No tiene rol de cliente.', content: new OA\JsonContent(ref: \App\OpenApi\Schemas\ErrorResponse::class)),
-            new OA\Response(response: 422, description: 'Error de validación.', content: new OA\JsonContent(ref: \App\OpenApi\Schemas\ValidationErrorResponse::class)),
-            new OA\Response(response: 500, description: 'Error interno del servidor.', content: new OA\JsonContent(ref: \App\OpenApi\Schemas\ServerErrorResponse::class)),
+            new OA\Response(response: 401, description: 'No autenticado.', content: new OA\JsonContent(ref: ErrorResponse::class)),
+            new OA\Response(response: 403, description: 'No tiene rol de cliente.', content: new OA\JsonContent(ref: ErrorResponse::class)),
+            new OA\Response(response: 422, description: 'Error de validación.', content: new OA\JsonContent(ref: ValidationErrorResponse::class)),
+            new OA\Response(response: 500, description: 'Error interno del servidor.', content: new OA\JsonContent(ref: ServerErrorResponse::class)),
         ],
     )]
     public function show(Request $request, Viaje $viaje): JsonResponse
@@ -135,23 +146,25 @@ class ViajeController extends Controller
             'mensajes' => fn ($query) => $query->latest()->limit(30),
         ]);
 
-        return response()->json(['data' => $viaje]);
+        return response()->json(['data' => ViajeResource::arreglo($viaje, $request)]);
     }
 
     /**
-     * POST /api/v1/viajes
+     * POST /api/v1/cliente/viajes (compatibilidad)
      *
-     * Solicitar un nuevo viaje (solo clientes).
+     * Endpoint original de solicitud. Delega en el mismo flujo que
+     * /cliente/viajes/solicitar y /cliente/viajes/reservar (cotización en el
+     * servidor, snapshot y despacho), para no mantener dos implementaciones.
      */
     #[OA\Post(
         path: '/cliente/viajes',
-        summary: 'Solicitar un viaje',
-        description: 'Calcula el costo estimado con la tarifa vigente y la distancia en línea recta entre origen y destino (App\ValueObjects\Coordinate::distanciaEnMetrosHacia).',
+        summary: 'Solicitar o reservar un viaje (compatibilidad)',
+        description: 'Endpoint anterior, conservado por compatibilidad. Con tipo = "programado" equivale a POST /cliente/viajes/reservar; en otro caso a POST /cliente/viajes/solicitar. Si se omite metodo_pago se asume "efectivo".',
         tags: ['Viajes'],
         security: [['bearerAuth' => []]],
         requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(ref: CrearViajeRequestSchema::class)),
         responses: [
-            new OA\Response(response: 201, description: 'Viaje solicitado.', content: new OA\JsonContent(properties: [
+            new OA\Response(response: 201, description: 'Viaje solicitado o reservado.', content: new OA\JsonContent(properties: [
                 new OA\Property(property: 'message', type: 'string', example: 'Viaje solicitado exitosamente.'),
                 new OA\Property(property: 'data', ref: ViajeSchema::class),
             ])),
@@ -160,89 +173,33 @@ class ViajeController extends Controller
             new OA\Response(response: 422, description: 'Error de validación.', content: new OA\JsonContent(ref: ValidationErrorResponse::class)),
         ],
     )]
-    public function store(Request $request): JsonResponse
+    public function store(Request $request, SolicitudViajeController $solicitudes): JsonResponse
     {
-        $cuenta = $request->user();
-
-        if ($cuenta->rol !== RolPersona::Cliente) {
+        if ($request->user()->rol !== RolPersona::Cliente) {
             return response()->json([
                 'message' => 'Solo los clientes pueden solicitar viajes.',
             ], Response::HTTP_FORBIDDEN);
         }
 
-        $validated = $request->validate([
-            'origen_lat' => ['required', 'numeric', 'between:-90,90'],
-            'origen_lng' => ['required', 'numeric', 'between:-180,180'],
-            'destino_lat' => ['required', 'numeric', 'between:-90,90'],
-            'destino_lng' => ['required', 'numeric', 'between:-180,180'],
-            'origen_localidad' => ['nullable', 'string', 'max:100'],
-            'origen_calle' => ['nullable', 'string', 'max:100'],
-            'origen_numero' => ['nullable', 'string', 'max:15'],
-            'tipo' => ['sometimes', new Enum(TipoViaje::class)],
-            'fecha_viaje' => ['sometimes', 'date', 'after_or_equal:now'],
-        ]);
+        $request->mergeIfMissing(['metodo_pago' => MetodoPago::Efectivo->value]);
 
-        $tarifa = Tarifa::vigente();
-
-        if (! $tarifa) {
-            return response()->json([
-                'message' => 'No hay una tarifa vigente configurada.',
-            ], Response::HTTP_CONFLICT);
-        }
-
-        $origen = new Coordinate(
-            lat: (float) $validated['origen_lat'],
-            lng: (float) $validated['origen_lng'],
-        );
-
-        $destino = new Coordinate(
-            lat: (float) $validated['destino_lat'],
-            lng: (float) $validated['destino_lng'],
-        );
-
-        // Estimación de distancia para cálculo de costo.
-        //
-        // Corrección de auditoría (HALL-010): distanciaEnMetrosHacia() da la
-        // distancia en línea recta, que subestima sistemáticamente el
-        // recorrido real en una ciudad con cuadrícula de calles. Se aplica
-        // un factor de corrección configurable (ver config/remiseria.php)
-        // hasta integrar una API de ruteo real.
-        $distanciaLineaRectaKm = $origen->distanciaEnMetrosHacia($destino) / 1000;
-        $distanciaKm = $distanciaLineaRectaKm * (float) config('remiseria.factor_correccion_distancia');
-        $costoEstimado = $tarifa->calcularCosto($distanciaKm);
-
-        $viaje = Viaje::query()->create([
-            'cliente_id' => $cuenta->persona_id,
-            'tarifa_id' => $tarifa->id,
-            'origen' => $origen,
-            'destino' => $destino,
-            'origen_localidad' => $validated['origen_localidad'] ?? null,
-            'origen_calle' => $validated['origen_calle'] ?? null,
-            'origen_numero' => $validated['origen_numero'] ?? null,
-            'estado' => EstadoViaje::Solicitado,
-            'tipo' => TipoViaje::tryFrom($validated['tipo'] ?? '') ?? TipoViaje::Actual,
-            'costo' => $costoEstimado,
-            'fecha_viaje' => $validated['fecha_viaje'] ?? now(),
-        ]);
-
-        $viaje->load(['cliente.persona', 'tarifa']);
-
-        return response()->json([
-            'message' => 'Viaje solicitado exitosamente.',
-            'data' => $viaje,
-        ], Response::HTTP_CREATED);
+        // Resolver el FormRequest desde el contenedor lo valida contra la
+        // request actual.
+        return $request->input('tipo') === TipoViaje::Programado->value
+            ? $solicitudes->reservar(app(ReservarViajeRequest::class))
+            : $solicitudes->solicitar(app(SolicitarViajeRequest::class));
     }
 
     /**
-     * PATCH /api/v1/viajes/{viaje}/aceptar
+     * POST|PATCH /api/v1/conductor/viajes/{viaje}/aceptar (CU 05)
      *
-     * Un conductor acepta un viaje solicitado. Usa lockForUpdate para evitar
-     * doble asignación bajo concurrencia (condición de carrera).
+     * Solo el conductor al que el algoritmo de asignación le ofreció el
+     * viaje, mientras la oferta esté vigente.
      */
-    #[OA\Patch(
+    #[OA\Post(
         path: '/conductor/viajes/{viaje}/aceptar',
-        summary: 'Aceptar un viaje solicitado',
-        description: 'Solo conductores en servicio, con estado "activo" y con vehículo asignado. Usa un lock pesimista (SELECT ... FOR UPDATE) para evitar que dos conductores acepten el mismo viaje bajo concurrencia.',
+        summary: 'Aceptar la oferta de un viaje',
+        description: 'Solo el conductor destinatario de la oferta pendiente (ver GET /conductor/viajes/pendientes), antes de que venza, estando activo, en servicio, con vehículo y sin otro viaje activo. Bloquea viaje, oferta y conductor (SELECT ... FOR UPDATE) para resolver carreras con el rechazo, el vencimiento y la cancelación. También se acepta PATCH por compatibilidad.',
         tags: ['Viajes'],
         security: [['bearerAuth' => []]],
         parameters: [new OA\Parameter(name: 'viaje', in: 'path', required: true, schema: new OA\Schema(type: 'integer'))],
@@ -251,73 +208,92 @@ class ViajeController extends Controller
                 new OA\Property(property: 'message', type: 'string', example: 'Viaje aceptado.'),
                 new OA\Property(property: 'data', ref: ViajeSchema::class),
             ])),
-            new OA\Response(response: 403, description: 'La cuenta autenticada no tiene rol "conductor".', content: new OA\JsonContent(ref: ErrorResponse::class)),
+            new OA\Response(response: 403, description: 'La cuenta no es conductor, o el viaje no le fue ofrecido.', content: new OA\JsonContent(ref: ErrorResponse::class)),
             new OA\Response(response: 404, description: 'Viaje inexistente.', content: new OA\JsonContent(ref: ErrorResponse::class)),
-            new OA\Response(response: 409, description: 'El conductor no está disponible, no tiene vehículo, ya tiene otro viaje activo, o el viaje ya no está disponible.', content: new OA\JsonContent(ref: ErrorResponse::class)),
+            new OA\Response(response: 409, description: 'La oferta venció o ya no está vigente, o el conductor no está disponible.', content: new OA\JsonContent(ref: ErrorResponse::class)),
         ],
     )]
-    public function aceptar(Request $request, Viaje $viaje): JsonResponse
+    public function aceptar(Request $request, Viaje $viaje, AsignadorConductores $asignador): JsonResponse
     {
-        $cuenta = $request->user();
-
-        if ($cuenta->rol !== RolPersona::Conductor) {
+        if ($request->user()->rol !== RolPersona::Conductor) {
             return response()->json([
                 'message' => 'Solo los conductores pueden aceptar viajes.',
             ], Response::HTTP_FORBIDDEN);
         }
 
-        $conductor = Conductor::query()->find($cuenta->persona_id);
-
-        if (! $conductor || ! $conductor->en_servicio || $conductor->estado->value !== 'activo') {
-            return response()->json([
-                'message' => 'El conductor no está disponible.',
-            ], Response::HTTP_CONFLICT);
-        }
-
-        if (! $conductor->vehiculo_id) {
-            return response()->json([
-                'message' => 'El conductor no tiene un vehículo asignado.',
-            ], Response::HTTP_CONFLICT);
-        }
-
         try {
-            DB::transaction(function () use ($viaje, $conductor): void {
-                // Lock pesimista: re-leer el viaje dentro de la transacción.
-                $viajeActual = Viaje::query()->lockForUpdate()->findOrFail($viaje->id);
-
-                if ($viajeActual->estado !== EstadoViaje::Solicitado) {
-                    throw new \RuntimeException('El viaje ya no está disponible para ser aceptado.');
-                }
-
-                // Verificar que el conductor no tenga otro viaje activo.
-                $tieneViajeActivo = Viaje::query()
-                    ->where('conductor_id', $conductor->persona_id)
-                    ->whereIn('estado', [EstadoViaje::Aceptado, EstadoViaje::EnCurso])
-                    ->lockForUpdate()
-                    ->exists();
-
-                if ($tieneViajeActivo) {
-                    throw new \RuntimeException('El conductor ya tiene un viaje en curso.');
-                }
-
-                $viajeActual->update([
-                    'conductor_id' => $conductor->persona_id,
-                    'vehiculo_id' => $conductor->vehiculo_id,
-                    'estado' => EstadoViaje::Aceptado,
-                ]);
-            });
-        } catch (\RuntimeException $e) {
-            return response()->json([
-                'message' => $e->getMessage(),
-            ], Response::HTTP_CONFLICT);
+            $viaje = $asignador->aceptar($viaje->id, $request->user()->persona_id);
+        } catch (RespuestaAsignacionInvalida $e) {
+            return response()->json(['message' => $e->getMessage()], $e->status);
         }
 
-        $viaje->refresh()->load(['cliente.persona', 'conductor.persona', 'vehiculo']);
+        $viaje->load(['cliente.persona', 'conductor.persona', 'vehiculo']);
 
         return response()->json([
             'message' => 'Viaje aceptado.',
-            'data' => $viaje,
+            'data' => ViajeResource::arreglo($viaje, $request),
         ]);
+    }
+
+    /**
+     * POST /api/v1/conductor/viajes/{viaje}/rechazar (CU 05, excepción 2.a)
+     */
+    #[OA\Post(
+        path: '/conductor/viajes/{viaje}/rechazar',
+        summary: 'Rechazar la oferta de un viaje',
+        description: 'Libera al conductor de la oferta y encola la asignación al siguiente candidato elegible. Al conductor no se le vuelve a ofrecer ese viaje.',
+        tags: ['Viajes'],
+        security: [['bearerAuth' => []]],
+        parameters: [new OA\Parameter(name: 'viaje', in: 'path', required: true, schema: new OA\Schema(type: 'integer'))],
+        responses: [
+            new OA\Response(response: 200, description: 'Oferta rechazada.', content: new OA\JsonContent(ref: SimpleMessageResponse::class)),
+            new OA\Response(response: 403, description: 'La cuenta no es conductor, o el viaje no le fue ofrecido.', content: new OA\JsonContent(ref: ErrorResponse::class)),
+            new OA\Response(response: 404, description: 'Viaje inexistente.', content: new OA\JsonContent(ref: ErrorResponse::class)),
+            new OA\Response(response: 409, description: 'La oferta ya no está vigente.', content: new OA\JsonContent(ref: ErrorResponse::class)),
+        ],
+    )]
+    public function rechazar(Request $request, Viaje $viaje, AsignadorConductores $asignador): JsonResponse
+    {
+        if ($request->user()->rol !== RolPersona::Conductor) {
+            return response()->json([
+                'message' => 'Solo los conductores pueden rechazar viajes.',
+            ], Response::HTTP_FORBIDDEN);
+        }
+
+        try {
+            $asignador->rechazar($viaje->id, $request->user()->persona_id);
+        } catch (RespuestaAsignacionInvalida $e) {
+            return response()->json(['message' => $e->getMessage()], $e->status);
+        }
+
+        return response()->json(['message' => 'Oferta rechazada. El viaje se ofrecerá a otro conductor.']);
+    }
+
+    /**
+     * POST /api/v1/admin/viajes/{viaje}/reasignar
+     */
+    #[OA\Post(
+        path: '/admin/viajes/{viaje}/reasignar',
+        summary: 'Reiniciar la búsqueda de conductor',
+        description: 'Para viajes "solicitado" cuya búsqueda se agotó (sin candidatos o sin aceptación). Vuelve a encolar la asignación automática; a los conductores que ya rechazaron o dejaron vencer la oferta no se les vuelve a ofrecer.',
+        tags: ['Viajes'],
+        security: [['bearerAuth' => []]],
+        parameters: [new OA\Parameter(name: 'viaje', in: 'path', required: true, schema: new OA\Schema(type: 'integer'))],
+        responses: [
+            new OA\Response(response: 202, description: 'Búsqueda reiniciada.', content: new OA\JsonContent(ref: SimpleMessageResponse::class)),
+            new OA\Response(response: 403, description: 'La cuenta autenticada no tiene rol "administrador".', content: new OA\JsonContent(ref: ErrorResponse::class)),
+            new OA\Response(response: 409, description: 'El viaje no está buscando conductor.', content: new OA\JsonContent(ref: ErrorResponse::class)),
+        ],
+    )]
+    public function reasignar(Viaje $viaje, AsignadorConductores $asignador): JsonResponse
+    {
+        if (! $asignador->reiniciarBusqueda($viaje)) {
+            return response()->json([
+                'message' => 'Solo se puede reiniciar la búsqueda de un viaje en estado "solicitado".',
+            ], Response::HTTP_CONFLICT);
+        }
+
+        return response()->json(['message' => 'Búsqueda de conductor reiniciada.'], Response::HTTP_ACCEPTED);
     }
 
     /**
@@ -361,69 +337,111 @@ class ViajeController extends Controller
 
         $this->authorize('ver', $viaje);
 
-        if ($viaje->estado !== EstadoViaje::Aceptado) {
-            return response()->json([
-                'message' => 'El viaje debe estar en estado "aceptado" para iniciarlo.',
-            ], Response::HTTP_CONFLICT);
-        }
-
         if ($viaje->conductor_id !== $request->user()->persona_id) {
             return response()->json([
                 'message' => 'Solo el conductor asignado puede iniciar el viaje.',
             ], Response::HTTP_FORBIDDEN);
         }
 
-        $viaje->update(['estado' => EstadoViaje::EnCurso]);
+        // Con la fila bloqueada y el estado re-chequeado: sin esto, una
+        // cancelación confirmada entre la lectura y el update quedaba pisada
+        // y el viaje cancelado pasaba a "en curso".
+        $iniciado = DB::transaction(function () use ($viaje): ?Viaje {
+            $actual = Viaje::query()->lockForUpdate()->findOrFail($viaje->id);
+
+            if ($actual->estado !== EstadoViaje::Aceptado) {
+                return null;
+            }
+
+            $actual->update([
+                'estado' => EstadoViaje::EnCurso,
+                'iniciado_en' => now(),
+                'distancia_recorrida_metros' => 0,
+                'puntos_seguimiento' => 0,
+            ]);
+
+            return $actual;
+        });
+
+        if ($iniciado === null) {
+            return response()->json([
+                'message' => 'El viaje debe estar en estado "aceptado" para iniciarlo.',
+            ], Response::HTTP_CONFLICT);
+        }
+
+        $viaje = $iniciado;
 
         return response()->json([
             'message' => 'Viaje iniciado.',
-            'data' => $viaje,
+            'data' => ViajeResource::arreglo($viaje, $request),
         ]);
     }
 
     /**
-     * PATCH /api/v1/viajes/{viaje}/finalizar
-     *
-     * El conductor finaliza el viaje.
+     * POST|PATCH /api/v1/conductor/viajes/{viaje}/finalizar (CU 06)
      */
-    #[OA\Patch(
+    #[OA\Post(
         path: '/conductor/viajes/{viaje}/finalizar',
         summary: 'Finalizar un viaje en curso',
+        description: 'Solo el conductor asignado. Valida con ST_Distance_Sphere que la última posición registrada del conductor esté a no más de FINALIZACION_RADIO_TOLERANCIA_METROS (100 m) del destino; si se envían lat/lng se registran antes como un ping GPS. Calcula distancia y duración finales y el costo_final con la tarifa guardada en el viaje (no la vigente). También se acepta PATCH por compatibilidad.',
         tags: ['Viajes'],
         security: [['bearerAuth' => []]],
         parameters: [new OA\Parameter(name: 'viaje', in: 'path', required: true, schema: new OA\Schema(type: 'integer'))],
+        requestBody: new OA\RequestBody(required: false, content: new OA\JsonContent(ref: UpdateUbicacionRequestSchema::class)),
         responses: [
             new OA\Response(response: 200, description: 'Viaje finalizado.', content: new OA\JsonContent(properties: [
                 new OA\Property(property: 'message', type: 'string', example: 'Viaje finalizado.'),
                 new OA\Property(property: 'data', ref: ViajeSchema::class),
             ])),
-            new OA\Response(response: 403, description: 'No tiene acceso a este viaje, o no es el conductor asignado ni administrador.', content: new OA\JsonContent(ref: ErrorResponse::class)),
+            new OA\Response(response: 403, description: 'La cuenta no es el conductor asignado.', content: new OA\JsonContent(ref: ErrorResponse::class)),
             new OA\Response(response: 404, description: 'Viaje inexistente.', content: new OA\JsonContent(ref: ErrorResponse::class)),
-            new OA\Response(response: 409, description: 'El viaje no está "en curso".', content: new OA\JsonContent(ref: ErrorResponse::class)),
+            new OA\Response(response: 409, description: 'El viaje no está "en curso", o no hay una ubicación reciente del conductor.', content: new OA\JsonContent(ref: ErrorResponse::class)),
+            new OA\Response(response: 422, description: 'El conductor está fuera del radio del destino (incluye distancia_al_destino_metros) o la ubicación enviada es inválida.', content: new OA\JsonContent(ref: ValidationErrorResponse::class)),
         ],
     )]
-    public function finalizar(Request $request, Viaje $viaje): JsonResponse
+    public function finalizar(Request $request, Viaje $viaje, FinalizacionDeViajes $finalizacion, RegistroDeUbicaciones $ubicaciones): JsonResponse
     {
-        $this->authorize('ver', $viaje);
+        $cuenta = $request->user();
 
-        if ($viaje->estado !== EstadoViaje::EnCurso) {
+        // El grupo de rutas ya exige rol conductor; se re-verifica (defensa
+        // en profundidad) y solo el conductor asignado puede finalizar.
+        if ($cuenta->rol !== RolPersona::Conductor || $viaje->conductor_id !== $cuenta->persona_id) {
             return response()->json([
-                'message' => 'El viaje debe estar "en curso" para finalizarlo.',
-            ], Response::HTTP_CONFLICT);
-        }
-
-        if ($viaje->conductor_id !== $request->user()->persona_id
-            && $request->user()->rol !== RolPersona::Administrador) {
-            return response()->json([
-                'message' => 'Solo el conductor asignado o un administrador puede finalizar el viaje.',
+                'message' => 'Solo el conductor asignado puede finalizar el viaje.',
             ], Response::HTTP_FORBIDDEN);
         }
 
-        $viaje->update(['estado' => EstadoViaje::Finalizado]);
+        $validated = $request->validate([
+            'lat' => ['nullable', 'numeric', 'between:-90,90', 'required_with:lng'],
+            'lng' => ['nullable', 'numeric', 'between:-180,180', 'required_with:lat'],
+            'precision_metros' => ['nullable', 'numeric', 'min:0', 'max:10000'],
+        ]);
+
+        $conductor = Conductor::query()->findOrFail($cuenta->persona_id);
+
+        try {
+            if (isset($validated['lat'], $validated['lng'])) {
+                $ubicaciones->registrar(
+                    $conductor,
+                    new Coordinate(lat: (float) $validated['lat'], lng: (float) $validated['lng']),
+                    isset($validated['precision_metros']) ? (float) $validated['precision_metros'] : null,
+                );
+                $conductor->refresh();
+            }
+
+            $viaje = $finalizacion->finalizar($viaje, $conductor);
+        } catch (UbicacionInconsistente $e) {
+            return response()->json([
+                'message' => $e->getMessage(),
+                'errors' => ['lat' => [$e->getMessage()]],
+            ], Response::HTTP_UNPROCESSABLE_ENTITY);
+        } catch (FinalizacionNoPermitida $e) {
+            return response()->json(['message' => $e->getMessage()] + $e->datos, $e->status);
+        }
 
         return response()->json([
             'message' => 'Viaje finalizado.',
-            'data' => $viaje,
+            'data' => ViajeResource::arreglo($viaje, $request),
         ]);
     }
 
@@ -435,7 +453,7 @@ class ViajeController extends Controller
     #[OA\Patch(
         path: '/viajes/{viaje}/cancelar',
         summary: 'Cancelar un viaje',
-        description: 'Solo el cliente que lo solicitó o un administrador; los conductores no pueden cancelar. No se puede cancelar un viaje ya finalizado o ya cancelado.',
+        description: 'Solo el cliente que lo solicitó o un administrador; los conductores no pueden cancelar. El cliente puede cancelar reservas, solicitudes y viajes aceptados; un viaje en curso solo puede cancelarlo un administrador. No se puede cancelar un viaje finalizado o ya cancelado.',
         tags: ['Viajes'],
         security: [['bearerAuth' => []]],
         parameters: [new OA\Parameter(name: 'viaje', in: 'path', required: true, schema: new OA\Schema(type: 'integer'))],
@@ -446,10 +464,10 @@ class ViajeController extends Controller
             ])),
             new OA\Response(response: 403, description: 'Un conductor intentó cancelar, o el cliente no es dueño del viaje.', content: new OA\JsonContent(ref: ErrorResponse::class)),
             new OA\Response(response: 404, description: 'Viaje inexistente.', content: new OA\JsonContent(ref: ErrorResponse::class)),
-            new OA\Response(response: 409, description: 'El viaje ya finalizó o ya estaba cancelado.', content: new OA\JsonContent(ref: ErrorResponse::class)),
+            new OA\Response(response: 409, description: 'El viaje ya finalizó o ya estaba cancelado, o el cliente intentó cancelar un viaje en curso.', content: new OA\JsonContent(ref: ErrorResponse::class)),
         ],
     )]
-    public function cancelar(Request $request, Viaje $viaje): JsonResponse
+    public function cancelar(Request $request, Viaje $viaje, AsignadorConductores $asignador): JsonResponse
     {
         $this->authorize('ver', $viaje);
 
@@ -473,11 +491,37 @@ class ViajeController extends Controller
             ], Response::HTTP_FORBIDDEN);
         }
 
-        $viaje->update(['estado' => EstadoViaje::Cancelado]);
+        // La transición se hace con la fila bloqueada para que una
+        // aceptación, un inicio o una finalización concurrentes no se
+        // pisen con la cancelación: se re-chequea el estado ya bloqueado.
+        try {
+            $viaje = DB::transaction(function () use ($viaje, $cuenta, $asignador): Viaje {
+                $actual = Viaje::query()->lockForUpdate()->findOrFail($viaje->id);
+
+                if ($actual->estado->esFinal()) {
+                    throw new TransicionDeViajeInvalida('No se puede cancelar un viaje que ya finalizó o fue cancelado.');
+                }
+
+                // Integridad financiera: un viaje en curso ya está prestando
+                // el servicio; si el cliente pudiera cancelarlo a mitad de
+                // camino, el viaje quedaría sin cobro. Solo un administrador
+                // puede hacerlo.
+                if ($actual->estado === EstadoViaje::EnCurso && $cuenta->rol !== RolPersona::Administrador) {
+                    throw new TransicionDeViajeInvalida('Un viaje en curso solo puede cancelarlo un administrador.');
+                }
+
+                $asignador->retirarOfertas($actual);
+                $actual->update(['estado' => EstadoViaje::Cancelado]);
+
+                return $actual;
+            });
+        } catch (TransicionDeViajeInvalida $e) {
+            return response()->json(['message' => $e->getMessage()], Response::HTTP_CONFLICT);
+        }
 
         return response()->json([
             'message' => 'Viaje cancelado.',
-            'data' => $viaje,
+            'data' => ViajeResource::arreglo($viaje, $request),
         ]);
     }
 
@@ -531,7 +575,22 @@ class ViajeController extends Controller
             'calificacion' => ['required', 'integer', 'between:1,5'],
         ]);
 
-        $viaje->update(['calificacion' => $validated['calificacion']]);
+        // UPDATE condicional: si dos requests pasan el chequeo anterior a la
+        // vez, solo una escribe (la otra afecta 0 filas) y el viaje no se
+        // califica dos veces ni se pisa la primera nota.
+        $calificado = Viaje::query()
+            ->whereKey($viaje->id)
+            ->where('estado', EstadoViaje::Finalizado)
+            ->whereNull('calificacion')
+            ->update(['calificacion' => $validated['calificacion']]);
+
+        if ($calificado === 0) {
+            return response()->json([
+                'message' => 'El viaje ya fue calificado.',
+            ], Response::HTTP_CONFLICT);
+        }
+
+        $viaje->refresh();
 
         // Corrección de auditoría (HALL-018): antes el promedio se
         // recalculaba con avg() fuera de cualquier transacción o lock. Dos
@@ -565,19 +624,19 @@ class ViajeController extends Controller
 
         return response()->json([
             'message' => 'Viaje calificado.',
-            'data' => $viaje,
+            'data' => ViajeResource::arreglo($viaje, $request),
         ]);
     }
 
     /**
-     * GET /api/v1/viajes/pendientes
+     * GET /api/v1/conductor/viajes/pendientes
      *
-     * Viajes solicitados pendientes de asignación (para conductores y admin).
+     * Ofertas vigentes del conductor autenticado (CU 05, paso 1).
      */
     #[OA\Get(
         path: '/conductor/viajes/pendientes',
-        summary: 'Listar viajes pendientes de asignación',
-        description: 'Viajes en estado "solicitado", ordenados por fecha_viaje ascendente, para que un conductor los tome con aceptar().',
+        summary: 'Ofertas de viaje pendientes del conductor',
+        description: 'Viajes que el algoritmo de asignación le ofreció al conductor autenticado y que todavía puede aceptar o rechazar. Cada elemento incluye "asignacion" con el id y el vencimiento de la oferta. Antes devolvía todos los viajes solicitados (modelo "el primero que acepta"); con la asignación automática cada viaje se ofrece a un conductor por vez.',
         tags: ['Viajes'],
         security: [['bearerAuth' => []]],
         responses: [
@@ -588,7 +647,16 @@ class ViajeController extends Controller
                     allOf: [
                         new OA\Schema(ref: PaginationMeta::class),
                         new OA\Schema(properties: [
-                            new OA\Property(property: 'data', type: 'array', items: new OA\Items(ref: ViajeSchema::class)),
+                            new OA\Property(property: 'data', type: 'array', items: new OA\Items(allOf: [
+                                new OA\Schema(ref: ViajeSchema::class),
+                                new OA\Schema(properties: [
+                                    new OA\Property(property: 'asignacion', type: 'object', properties: [
+                                        new OA\Property(property: 'id', type: 'integer', example: 12),
+                                        new OA\Property(property: 'expira_en', type: 'string', format: 'date-time'),
+                                        new OA\Property(property: 'distancia_metros', type: 'integer', nullable: true, example: 850),
+                                    ]),
+                                ]),
+                            ])),
                         ]),
                     ],
                 ),
@@ -598,12 +666,31 @@ class ViajeController extends Controller
     )]
     public function pendientes(Request $request): JsonResponse
     {
-        $viajes = Viaje::query()
-            ->with(['cliente.persona', 'tarifa'])
-            ->listosParaDespacho()
-            ->orderBy('fecha_viaje')
-            ->paginate(15);
+        $conductorId = $request->user()->persona_id;
 
-        return response()->json($viajes);
+        $viajes = Viaje::query()
+            ->with([
+                'cliente.persona',
+                'tarifa',
+                'asignaciones' => fn ($q) => $q->pendientes()->where('conductor_id', $conductorId),
+            ])
+            ->where('estado', EstadoViaje::Solicitado)
+            ->whereHas('asignaciones', fn ($q) => $q->pendientes()
+                ->where('conductor_id', $conductorId)
+                ->where('expira_en', '>', now()))
+            ->orderBy('fecha_viaje')
+            ->paginate($this->porPagina($request));
+
+        return response()->json($viajes->through(function (Viaje $viaje) use ($request): array {
+            $asignacion = $viaje->asignaciones->first();
+
+            return ViajeResource::arreglo($viaje, $request) + [
+                'asignacion' => [
+                    'id' => $asignacion->id,
+                    'expira_en' => $asignacion->expira_en->toIso8601String(),
+                    'distancia_metros' => $asignacion->distancia_metros,
+                ],
+            ];
+        }));
     }
 }

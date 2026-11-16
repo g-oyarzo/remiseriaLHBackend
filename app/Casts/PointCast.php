@@ -26,6 +26,18 @@ use InvalidArgumentException;
  */
 final class PointCast implements CastsAttributes
 {
+    /**
+     * Expresión SQL (con un placeholder para el WKT) que construye un punto
+     * SRID 4326 a partir de Coordinate::toWkt().
+     *
+     * En MySQL 8 el SRS geográfico 4326 tiene orden de ejes latitud-longitud,
+     * así que sin la opción 'axis-order=long-lat' el texto POINT(lng lat)
+     * se interpretaba con los ejes invertidos: las coordenadas quedaban
+     * guardadas al revés y ST_Distance_Sphere() devolvía distancias erróneas
+     * (un desplazamiento real de ~1,1 km en latitud se medía como ~590 m).
+     */
+    public const SQL_PUNTO_DESDE_WKT = "ST_GeomFromText(?, 4326, 'axis-order=long-lat')";
+
     public function get(Model $model, string $key, mixed $value, array $attributes): ?Coordinate
     {
         if ($value === null) {
@@ -66,6 +78,8 @@ final class PointCast implements CastsAttributes
             ),
         };
 
-        return DB::raw(sprintf("ST_GeomFromText('%s', 4326)", $coordenada->toWkt()));
+        // toWkt() solo produce dígitos, signo y punto decimal (formato %F),
+        // por lo que embeber el valor en el SQL no abre una vía de inyección.
+        return DB::raw(str_replace('?', "'{$coordenada->toWkt()}'", self::SQL_PUNTO_DESDE_WKT));
     }
 }

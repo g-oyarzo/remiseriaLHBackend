@@ -94,6 +94,12 @@ return [
                     'trim',
                     explode(',', env('REVERB_ALLOWED_ORIGINS', '*'))
                 )),
+                // Seguridad (SEC-02): eventos "client-*" (whisper) deshabilitados.
+                // Con el valor por defecto de Reverb ("all") cualquiera que
+                // conociera la clave pública podía inyectar eventos en canales
+                // privados sin estar suscripto. La app no usa eventos de cliente:
+                // todo pasa por la API y se difunde desde el backend.
+                'accept_client_events_from' => env('REVERB_ACCEPT_CLIENT_EVENTS_FROM', 'none'),
                 'ping_interval' => env('REVERB_APP_PING_INTERVAL', 60),
                 'activity_timeout' => env('REVERB_APP_ACTIVITY_TIMEOUT', 30),
                 'max_message_size' => env('REVERB_APP_MAX_MESSAGE_SIZE', 10_000),

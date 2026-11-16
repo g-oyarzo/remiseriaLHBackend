@@ -11,7 +11,6 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
-
 use Laravel\Sanctum\HasApiTokens;
 
 /**
@@ -38,6 +37,21 @@ class Cuenta extends Authenticatable
         'password',
         'remember_token',
     ];
+
+    /**
+     * Seguridad (SEC-04): al cambiar la contraseña o el email se revocan todos
+     * los tokens de la cuenta. Si un administrador cambia la contraseña de un
+     * conductor porque su cuenta fue comprometida, el atacante pierde el
+     * acceso en el momento (antes conservaba su token hasta 24 h).
+     */
+    protected static function booted(): void
+    {
+        static::updated(function (self $cuenta): void {
+            if ($cuenta->wasChanged(['password', 'email'])) {
+                $cuenta->tokens()->delete();
+            }
+        });
+    }
 
     /**
      * @return array<string, string>

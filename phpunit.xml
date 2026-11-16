@@ -19,6 +19,15 @@
     </source>
     <php>
         <env name="APP_ENV" value="testing"/>
+        <!-- Valores exclusivos de test (no son secretos de ningún entorno):
+             permiten correr la suite sin un .env local. -->
+        <env name="APP_KEY" value="base64:dGVzdC1rZXktcmVtaXNlcmlhLWxoLXNvbG8tdGVzdHM="/>
+        <env name="REVERB_APP_ID" value="test-app"/>
+        <env name="REVERB_APP_KEY" value="test-key"/>
+        <env name="REVERB_APP_SECRET" value="test-secret"/>
+        <env name="REVERB_HOST" value="localhost"/>
+        <env name="REVERB_PORT" value="8080"/>
+        <env name="REVERB_SCHEME" value="http"/>
         <env name="APP_MAINTENANCE_DRIVER" value="file"/>
         <env name="BCRYPT_ROUNDS" value="4"/>
         <!-- reverb en lugar de null: NullBroadcaster.auth() es un no-op que siempre
@@ -33,6 +42,16 @@
         <env name="DB_USERNAME" value="root"/>
         <env name="DB_PASSWORD" value="password"/>
         <env name="MAIL_MAILER" value="array"/>
+        <!-- Las difusiones en tiempo real se descartan (ver config/queue.php). -->
+        <env name="DIFUSION_CONEXION_COLA" value="descartar" force="true"/>
+        <!-- Último ping GPS en memoria (sin depender de Redis). -->
+        <env name="UBICACION_CACHE_STORE" value="array" force="true"/>
+        <!-- Los tests nunca deben llamar a un servicio de mapas real. -->
+        <env name="MAPAS_DRIVER" value="ninguno" force="true"/>
+        <env name="CLIMA_DRIVER" value="ninguno" force="true"/>
+        <env name="MERCADOPAGO_ACCESS_TOKEN" value="" force="true"/>
+        <env name="MERCADOPAGO_WEBHOOK_SECRET" value="" force="true"/>
+        <env name="MERCADOPAGO_NOTIFICATION_URL" value="" force="true"/>
         <env name="QUEUE_CONNECTION" value="sync"/>
         <env name="SESSION_DRIVER" value="array"/>
         <env name="PULSE_ENABLED" value="false"/>

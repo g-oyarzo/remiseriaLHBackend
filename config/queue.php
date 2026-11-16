@@ -35,6 +35,13 @@ return [
             'driver' => 'sync',
         ],
 
+        // Descarta los trabajos. Se usa en tests para las difusiones en
+        // tiempo real (DIFUSION_CONEXION_COLA=descartar), que de otro modo
+        // intentarían conectarse a un servidor Reverb.
+        'descartar' => [
+            'driver' => 'null',
+        ],
+
         'database' => [
             'driver' => 'database',
             'connection' => env('DB_QUEUE_CONNECTION'),
@@ -69,7 +76,10 @@ return [
             'connection' => env('REDIS_QUEUE_CONNECTION', 'default'),
             'queue' => env('REDIS_QUEUE', 'default'),
             'retry_after' => (int) env('REDIS_QUEUE_RETRY_AFTER', 90),
-            'block_for' => null,
+            // Segundos que el worker espera bloqueado (BLPOP) a un job nuevo.
+            // Con null hace polling cada --sleep segundos, lo que suma hasta
+            // 1 s a la entrega de cada ubicación (RNF02). Producción: 5.
+            'block_for' => env('REDIS_QUEUE_BLOCK_FOR') !== null ? (int) env('REDIS_QUEUE_BLOCK_FOR') : null,
             'after_commit' => false,
         ],
 
